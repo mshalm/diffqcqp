@@ -55,13 +55,12 @@ VectorXd solveLCQP( const py::EigenDRef<const MatrixXd> &P, const py::EigenDRef<
     return solution;
 }
 
-std::tuple<VectorXd,VectorXd> solveDerivativesLCQP(const py::EigenDRef<const MatrixXd> &P, const py::EigenDRef<const VectorXd> &q, const py::EigenDRef<const VectorXd> &l, const py::EigenDRef<const VectorXd> &grad_l, const double epsilon =1e-10){
+VectorXd solveDerivativesLCQP(const py::EigenDRef<const MatrixXd> &P, const py::EigenDRef<const VectorXd> &q, const py::EigenDRef<const VectorXd> &l, const py::EigenDRef<const VectorXd> &grad_l, const double epsilon =1e-10){
     Solver solver;
     int n_contacts = l.size() / 3;
     VectorXd gamma(n_contacts), bl(n_contacts * 3);
-    gamma = solver.dualFromPrimalLCQP(P,q,l,epsilon);
     bl = solver.solveDerivativesLCQP(P,q,l,gamma,grad_l,epsilon);
-    return std::make_tuple(bl,gamma);
+    return bl;
 }
 
 

@@ -64,65 +64,93 @@ class QCQP_cvxpy(nn.Module):
 
 
 
-cvxpy_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0}
-qcqp_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0}
+cvxpy_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0, 'obj': [], 'grad': [], 'drop': []}
+qcqp_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0, 'obj': [], 'grad': [], 'drop': []}
+comp = {'abs_err': [], 'rel_err': [], 'abs_err_grad': [], 'rel_err_grad': [], 'our_advantage': [], 'our_rel_advantage': []}
 n_testqcqp= 100
 NC = 8
 N = NC * 3
-scale = 8
+scale = 4
+qcqp2 = QCQP_cvxpy(NC, eps=1e-10,max_iter = 1000000)
+lcqp = LCQPFn2().apply
+def qcqpfunct(Q, p):
+    warm_start = torch.rand(q.size())
+    return lcqp(P,q,warm_start,1e-10,1000000)
+
+def cvxpyfunct(Q, p):
+    warm_start = torch.rand(q.size())
+    return qcqp2(P,q).unsqueeze(2)
+
+
+def QCQP_eval(P, q, func, timed):
+    P_qcqp = torch.nn.parameter.Parameter(P.detach().clone(), requires_grad= True)
+    q_qcqp = torch.nn.parameter.Parameter(q.detach().clone(), requires_grad= True)
+    lr = 1e-4
+    optimizer_qcqp = optim.Adam([P_qcqp,q_qcqp], lr=lr)
+    l1 = func(P_qcqp,q_qcqp)
+    fnan = 0
+    if np.any(np.isnan(l1.detach().numpy())):
+        fnan += 1
+    tf = 0
+    if timed:
+        tf = timeit.timeit(lambda: func(P_qcqp,q_qcqp),number = 10)/10.
+    
+    L1 = l1.transpose(1,2).bmm(0.5 * P_qcqp.bmm(l1) + q_qcqp) + 0.5 * q_qcqp.transpose(1,2).bmm(q_qcqp)
+    loss = L1.detach().numpy().item()
+    optimizer_qcqp.zero_grad()
+    tb = 0
+    if timed:
+        tb = timeit.timeit(lambda:L1.backward(retain_graph=True),number = 10)/10.
+    L1.backward()
+    bnan = 0
+    if np.any(np.isnan(P_qcqp.grad.detach().numpy())) or np.any(np.isnan(q_qcqp.grad.detach().numpy())):
+        bnan += 1
+    grad = torch.cat((P_qcqp.grad,P_qcqp.grad),dim=2).detach().numpy()
+    optimizer_qcqp.step()
+    l1 = func(P_qcqp,q_qcqp)
+    L1 = l1.transpose(1,2).bmm(0.5 * P_qcqp.bmm(l1) + q_qcqp) + 0.5 * q_qcqp.transpose(1,2).bmm(q_qcqp)
+    drop = loss - L1.detach().numpy().item()
+    return (fnan, bnan, tf, tb, loss, grad, drop)
+
 for i in tqdm(range(n_testqcqp)):    
     #P = torch.rand((1,8,8),dtype = torch.double)
     P = torch.rand(N)*2 -1
     P = P * scale
-    P = torch.diag(torch.exp(P)).unsqueeze(0)
-    #P = torch.matmul(P, torch.transpose(P,1,2))
-    P = torch.nn.parameter.Parameter(P, requires_grad= True)
+    P_sqrt = torch.diag(torch.pow(10,P/2)).unsqueeze(0)
+    P = torch.diag(torch.pow(10,P)).unsqueeze(0)
     q = torch.rand((1,N,1),dtype = torch.double)*2-1
-    q = q * scale
-    q = torch.nn.parameter.Parameter(q, requires_grad= True)
-    lr = 0.1
-    optimizer2 = optim.Adam([P,q], lr=lr)
-    loss = nn.MSELoss()
-    relu = torch.nn.ReLU()
-    threshold = nn.Threshold(threshold=1e-5, value =1e-5)
-    target = torch.ones(q.size())
-    qcqp = LCQPFn2().apply
-    #warm_start = torch.zeros(q.size())
-    warm_start = torch.rand(q.size())
-    t0 = time()
-    l1= qcqp(P,q,warm_start,1e-10,1000000)
-    if np.any(np.isnan(l1.detach().numpy())):
-        qcqp_time['fnan'] += 1
-    t1= time()
-    qcqp_time['forward']+= [timeit.timeit(lambda:qcqp(P,q,warm_start,1e-10,1000000),number = 10)/10.]
+    q = P_sqrt.bmm(q)
+    #P = torch.matmul(P, torch.transpose(P,1,2))
+    (fnan, bnan, tf, tb, loss, grad, drop) = QCQP_eval(P, q, qcqpfunct, True)
+    qcqp_time['fnan'] += fnan
+    qcqp_time['bnan'] += bnan
+    qcqp_time['forward']+= [tf]
+    qcqp_time['backward']+= [tb]
+    qcqp_time['grad'] += [grad]
+    qcqp_time['obj'] += [loss]
+    qcqp_time['drop'] += [drop] 
+
+    (fnan, bnan, tf, tb, loss, grad, drop) = QCQP_eval(P, q, cvxpyfunct, True)
+    cvxpy_time['fnan'] += fnan
+    cvxpy_time['bnan'] += bnan
+    cvxpy_time['forward']+= [tf]
+    cvxpy_time['backward']+= [tb]
+    cvxpy_time['grad'] += [grad]
+    cvxpy_time['obj'] += [loss]
+    cvxpy_time['drop'] += [drop] 
+
+
+    comp['abs_err'] += [np.abs(qcqp_time['obj'][-1] - cvxpy_time['obj'][-1])]
+    comp['our_advantage'] += [qcqp_time['drop'][-1] - cvxpy_time['drop'][-1]]
+    comp['rel_err'] += [2 * comp['abs_err'][-1]/np.abs(qcqp_time['obj'][-1] + cvxpy_time['obj'][-1])]
+    comp['our_rel_advantage'] += [2 * comp['our_advantage'][-1] / (np.abs(qcqp_time['drop'][-1]) + np.abs(cvxpy_time['drop'][-1]))]
+    comp['abs_err_grad'] += [np.sqrt(np.sum((cvxpy_time['grad'][-1]-qcqp_time['grad'][-1]) ** 2))]
+    cvxpy_time['grad'][-1] = np.sqrt(np.sum(cvxpy_time['grad'][-1] ** 2))
+    qcqp_time['grad'][-1] = np.sqrt(np.sum(qcqp_time['grad'][-1] ** 2))
+    comp['rel_err_grad'] += [2 * comp['abs_err_grad'][-1]/np.abs(qcqp_time['grad'][-1] + cvxpy_time['grad'][-1])]
     #pdb.set_trace()
-    L1 = loss(l1, target)
-    optimizer2.zero_grad()
-    qcqp_time['backward']+= [timeit.timeit(lambda:L1.backward(retain_graph=True),number = 10)/10.]
-    t2 = time()
-    L1.backward()
-    t3 = time()
 
-    if np.any(np.isnan(P.grad.detach().numpy())) or np.any(np.isnan(q.grad.detach().numpy())):
-        qcqp_time['bnan'] += 1
-
-    #qcqp_time['forward']+= [t1-t0]
-    #qcqp_time['backward']+= [t3-t2]
-    qcqp2 = QCQP_cvxpy(NC, eps=1e-10,max_iter = 1000000)
-    t4 = time()
-    l1 = qcqp2(P,q)
-    cvxpy_time['forward']+= [timeit.timeit(lambda:qcqp2(P,q),number = 10)/10.]
-    if np.any(np.isnan(l1.detach().numpy())):
-        cvxpy_time['fnan'] += 1
-    t5= time()
-    L1 = loss(l1.unsqueeze(2), target)
-    optimizer2.zero_grad()
-    t6 = time()
-    cvxpy_time['backward']+= [timeit.timeit(lambda:L1.backward(retain_graph=True),number = 10)/10.]
-    t7 = time()
-
-    if np.any(np.isnan(P.grad.detach().numpy())) or np.any(np.isnan(q.grad.detach().numpy())):
-        qcqp_time['bnan'] += 1
+    
 
     #cvxpy_time['forward']+= [t5-t4]
     #cvxpy_time['backward']+= [t7-t6]
@@ -153,7 +181,7 @@ er1 = [cvxpy_time['error forward'],qcqp_time['error forward']]
 er2 = [cvxpy_time['error backward'],qcqp_time['error backward']]
 r1 = range(len(y1))
 r2 = [x + barWidth for x in r1]
-plt.figure()
+plt.figure(1)
 plt.bar(r1, y1, width = barWidth, color = ['cornflowerblue' for i in y1], linewidth = 2,log = True, label="forward", yerr = er1)
 plt.bar(r2, y2, width = barWidth, color = ['coral' for i in y1], linewidth = 4,log = True,label="backward", yerr = er2)
 plt.xticks([r + barWidth / 2 for r in range(len(y1))], ['cvxpylayers', 'Ours'])
@@ -161,4 +189,62 @@ plt.ylabel('Runtime (s)')
 plt.title('QCQP solvers')
 plt.ylim(bottom = 1e-5, top= 1e-1)
 plt.legend()
+
+plt.figure(2)
+hist_vals = np.log10(np.array(comp['abs_err']) + 1e-16)
+
+
+plt.hist(hist_vals)
+plt.xlabel('log10(absolute obj. err)')
+
+plt.figure(3)
+hist_vals = np.log10(np.array(comp['rel_err']))
+
+
+plt.hist(hist_vals)
+plt.xlabel('log10(relative obj. err)')
+
+plt.figure(4)
+hist_vals = np.log10(np.array(qcqp_time['obj']))
+
+plt.hist(hist_vals)
+plt.xlabel('log10(objective)')
+
+
+
+
+plt.figure(5)
+hist_vals = np.log10(np.array(comp['abs_err_grad']))
+
+
+plt.hist(hist_vals)
+plt.xlabel('log10(absolute grad. err)')
+
+plt.figure(6)
+hist_vals = np.log10(np.array(comp['rel_err_grad']))
+
+
+plt.hist(hist_vals)
+plt.xlabel('log10(relative grad. err)')
+
+plt.figure(7)
+hist_vals = np.log10(np.array(qcqp_time['grad']))
+
+plt.hist(hist_vals)
+plt.xlabel('log10(frobenius_norm(grad))')
+
+plt.figure(8)
+hist_vals = np.array(comp['our_advantage'])
+
+plt.hist(hist_vals)
+plt.xlabel('(abs. performance difference)')
+
+plt.figure(9)
+hist_vals = np.array(comp['our_rel_advantage'])
+
+plt.hist(hist_vals)
+plt.xlabel('(rel. performance difference)')
+
+
+
 plt.show()
