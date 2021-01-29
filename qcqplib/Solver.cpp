@@ -519,68 +519,108 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
     VectorXd slack(nb_contacts);
     double norm_lfi;
     VectorXd l_fi(2);
-    MatrixXd C = MatrixXd::Zero(3*nb_contacts,nb_contacts);
-    MatrixXd D_tild = MatrixXd::Zero(3*nb_contacts, 3*nb_contacts);
+    MatrixXd D = MatrixXd::Zero(3*nb_contacts, 3*nb_contacts);
+    double constraint_eps = 1e-10;
     for(int i = 0; i < nb_contacts; i++){
         l_fi(0) = l(nb_contacts + 2*i);
         l_fi(1) = l(nb_contacts + 2*i+1);
         norm_lfi = l_fi.squaredNorm();
         slack(i) = norm_lfi - (l(i) * l(i));
-        C(i, i) = - 2 * l(i);
-        C(nb_contacts + 2*i, i) = 2 * l(nb_contacts + 2*i);
-        C(nb_contacts + 2*i+1, i) = 2 * l(nb_contacts + 2*i+1);
-        D_tild(i, i) = -2 * gamma(i);
-        D_tild(nb_contacts + 2 * i, nb_contacts + 2 * i) = 2 * gamma(i);
-        D_tild(nb_contacts + 2 * i + 1,nb_contacts + 2 * i + 1) = 2 * gamma(i);
+        D(i, i) = -2 * gamma(i);
+        D(nb_contacts + 2 * i, nb_contacts + 2 * i) = 2 * gamma(i);
+        D(nb_contacts + 2 * i + 1,nb_contacts + 2 * i + 1) = 2 * gamma(i);
     }
-    std::vector<int> not_null;
+    std::vector<int> edge_active;
+    std::vector<int> base_active;
     for (int i = 0; i<nb_contacts; i++){
-        if(slack(i)>-1e-10){
-            not_null.push_back(i);
+        if(slack(i)>-constraint_eps){
+            if (l(i) < constraint_eps)
+            {
+            base_active.push_back(i);
+            }
+            edge_active.push_back(i);
+        }
+        
+    }
+    int nbi = base_active.size();
+    //for (int i = 0; i<nbi; i++){
+    //    base_inactive.push_back(nb_contacts + 2 * i);
+    //    base_in=active.push_back(nb_contacts + 2 * i + 1);
+    //}
+    int n_constraints = edge_active.size() + 2 * base_active.size();
+    int cur_constraint = 0;
+    int ni, fxi, fyi;
+    MatrixXd B = MatrixXd::Zero(n_constraints, 3*nb_contacts);
+    for (int i = 0; i<edge_active.size(); i++){
+        ni = edge_active[i];
+        fxi = edge_active[i] * 2 + nb_contacts;
+        fyi = fxi + 1;
+        if (l(ni) < constraint_eps)
+        {
+            // base constraint
+            B(cur_constraint++, ni) = 1.0;
+            B(cur_constraint++, fxi) = 1.0;
+            B(cur_constraint++, fyi) = 1.0;
+        }
+        else
+        {
+            B(cur_constraint, ni) = - 2. * l(ni);
+            B(cur_constraint, fxi) = 2. * l(fxi);
+            B(cur_constraint++, fyi) = 2. * l(fyi);
         }
     }
     //MatrixXd A_tild = MatrixXd::Zero(not_null.size(),not_null.size());
     //MatrixXd A_tild_inv = MatrixXd::Zero(not_null.size(),not_null.size());
     //MatrixXd B = gamma.asDiagonal()*(C.transpose());
-    MatrixXd B = (C.transpose());
-    MatrixXd B_tild(not_null.size(),B.cols()), C_tild(C.rows(), not_null.size());
-    for(int i = 0; i< not_null.size(); i++){
-        //A_tild(i,i) = 1. / slack(not_null[i]);
-        //A_tild_inv(i,i) = 1. / (slack(not_null[i]) );
-        B_tild.row(i) = B.row(not_null[i]);
-        C_tild.col(i) = C.col(not_null[i]);
-    }
-    D_tild = D_tild+P;
-    MatrixXd A(l.size()+not_null.size(),l.size()+not_null.size());
-    //A.topLeftCorner(not_null.size(),not_null.size()) = A_tild;
-    A.topRightCorner(not_null.size(),l.size()) = B_tild;
-    A.bottomLeftCorner(l.size(),not_null.size()) = C_tild;
-    A.bottomRightCorner(l.size(),l.size()) = D_tild;
+    D = D+P;
+
+
+    //MatrixXd B_tild(edge_active.size(), base_inactive.size());
+    //MatrixXd C_tild(nb_contacts * 3, edge_active.size());
+    //MatrixXd D_tild(nb_contacts * 3, base_inactive.size());
+    //std::vector<int> C_keep_rows;
+    //for(int i = 0; i< edge_active.size(); i++){
+    //    C_tild.col(i) = C.col(edge_active[i]);
+
+    //}
+    //for(int i = 0; i< base_inactive.size(); i++){
+    //    B_tild.col(i) = C_tild.row(base_inactive[i]);
+    //    D_tild.col(i) = D_tild.col(base_inactive[i]);
+    //}
+    //MatrixXd A(edge_active.size() + l.size(), edge_active.size() + base_inactive.size());
+    MatrixXd A(edge_active.size() + l.size(), edge_active.size() + l.size());
     
+    //A.topRightCorner(edge_active.size(),base_inactive.size()) = B_tild;
+    //A.bottomLeftCorner(l.size(), edge_active.size()) = C_tild;
+    //A.bottomRightCorner(l.size(), base_inactive.size()) = D_tild;
+    A.topRightCorner(edge_active.size(),l.size()) = B;
+    A.bottomLeftCorner(l.size(), edge_active.size()) = B.transpose();
+    A.bottomRightCorner(l.size(), l.size()) = D;
 
     //MatrixXd A(l.size(),l.size());
     //A = D_tild - (C_tild * (A_tild_inv * D_tild));
     A.transposeInPlace();
 
-    VectorXd dd(A.cols());
+    VectorXd dd(A.rows());
     for(int i = 0 ; i< dd.size(); i++){
-        if(i<not_null.size()){
+        if(i<edge_active.size()){
             dd(i) = 0.;
         }
         else{
-            dd(i) = grad_l(i-not_null.size());
+            dd(i) = grad_l(i-edge_active.size());
         }
     }
     VectorXd b(A.cols());
-    b = Solver::iterative_refinement(A,dd);
+    b = iterative_refinement(A,dd);
     //b = A.llt().solve(dd);
     //b = A.colPivHouseholderQr().solve(dd);
     //b = Solver::iterative_refinement(A,grad_l);
     
     VectorXd bl = VectorXd::Zero(l.size());
-    for (int i = 0; i < bl.size(); i++)
+    for (int i = 0; i < l.size(); i++)
     {
-        bl(i) = b(i+not_null.size());
+        //bl(base_inactive[i]) = b(i+edge_active.size());
+        bl(i) = b(i+edge_active.size());
     }
     return bl;
 }
