@@ -617,13 +617,13 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
     //    D_tild.col(i) = D_tild.col(base_inactive[i]);
     //}
     //MatrixXd A(edge_active.size() + l.size(), edge_active.size() + base_inactive.size());
-    MatrixXd A(edge_active.size() + l.size(), edge_active.size() + l.size());
+    MatrixXd A(n_constraints + l.size(), n_constraints+ l.size());
     
     //A.topRightCorner(edge_active.size(),base_inactive.size()) = B_tild;
     //A.bottomLeftCorner(l.size(), edge_active.size()) = C_tild;
     //A.bottomRightCorner(l.size(), base_inactive.size()) = D_tild;
-    A.topRightCorner(edge_active.size(),l.size()) = B;
-    A.bottomLeftCorner(l.size(), edge_active.size()) = B.transpose();
+    A.topRightCorner(n_constraints,l.size()) = B;
+    A.bottomLeftCorner(l.size(), n_constraints) = B.transpose();
     A.bottomRightCorner(l.size(), l.size()) = D;
 
     //MatrixXd A(l.size(),l.size());
@@ -632,11 +632,11 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
 
     VectorXd dd(A.rows());
     for(int i = 0 ; i< dd.size(); i++){
-        if(i<edge_active.size()){
+        if(i<n_constraints){
             dd(i) = 0.;
         }
         else{
-            dd(i) = grad_l(i-edge_active.size());
+            dd(i) = grad_l(i-n_constraints);
         }
     }
     VectorXd b(A.cols());
@@ -649,7 +649,7 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
     for (int i = 0; i < l.size(); i++)
     {
         //bl(base_inactive[i]) = b(i+edge_active.size());
-        bl(i) = b(i+edge_active.size());
+        bl(i) = b(i+n_constraints);
     }
     return bl;
 }
