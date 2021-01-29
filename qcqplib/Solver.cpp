@@ -20,7 +20,7 @@ VectorXd Solver::iterative_refinement(const Ref<const MatrixXd> &A,const VectorX
     AA_tild = A.transpose()*A;
     AA_tild += mu_ir*MatrixXd::Identity(AA_tild.rows(),AA_tild.cols());
     AA_tild_inv.setIdentity();
-    AA_tild.llt().solveInPlace(AA_tild_inv);
+    AA_tild.ldlt().solveInPlace(AA_tild_inv);
     int not_improved = 0;
     double res;
     double res_pred = std::numeric_limits<double>::max();
@@ -29,6 +29,35 @@ VectorXd Solver::iterative_refinement(const Ref<const MatrixXd> &A,const VectorX
         x = mu_ir*AA_tild_inv*x + AA_tild_invAb;
         delta.noalias() = AA_tild*x - Ab;
         res = delta.norm();
+        if(res_pred - res < epsilon){
+            not_improved++;
+        }
+        else{
+            res_pred = res;
+            not_improved = 0;
+        }
+        if (res<epsilon || not_improved ==2){
+            break;
+        }
+    }
+    return x;
+}
+
+VectorXd Solver::iterative_refinement2(const Ref<const MatrixXd> &A,const VectorXd &b,const double mu_ir = 1e-7,const double epsilon = 1e-10,const int max_iter = 10){ //solves the system Ax=b using iterative refinement
+
+    VectorXd x = VectorXd::Zero(A.cols());
+    VectorXd delta = VectorXd::Zero(A.cols());
+    ColPivHouseholderQR<MatrixXd> qr(A.rows(), A.cols());
+    //BDCSVD<MatrixXd> qr(A.rows(), A.cols(), ComputeThinU | ComputeThinV);
+    qr.compute(A);
+    int not_improved = 0;
+    double res;
+    double res_pred = std::numeric_limits<double>::max();
+    x = qr.solve(b);
+    for(int i = 0; i<max_iter; i++){
+        delta.noalias() = b - A * x;
+        res = delta.norm();
+        x = x.eval() + qr.solve(delta);
         if(res_pred - res < epsilon){
             not_improved++;
         }
@@ -485,7 +514,7 @@ VectorXd Solver::dualFromPrimalLCQP(const MatrixXd &P, const VectorXd &q, const 
         A(nb_contacts + 2 * i + 1,i) = 2 * l(nb_contacts + 2 * i + 1);
         l_fi(0) = l(nb_contacts + 2 * i);
         l_fi(1) = l(nb_contacts + 2 * i + 1);
-        slack(i) = l(i) - l_fi.norm();
+        slack(i) = l(i) * l(i) - l_fi.squaredNorm();
         if(slack(i) > epsilon){
             gamma(i) = 0;
         }
@@ -504,7 +533,7 @@ VectorXd Solver::dualFromPrimalLCQP(const MatrixXd &P, const VectorXd &q, const 
     //gamma_not_null = -(A_tild.transpose() * A_tild).llt().solve(A_tild.transpose()*(P*l+q));
     //gamma_not_null = -(A_tild.transpose() * A_tild).colPivHouseholderQr().solve(A_tild.transpose()*(P*l+q));
     //gamma_not_null = -A_tild.colPivHouseholderQr().solve(P * l + q);
-    gamma_not_null = -iterative_refinement(A_tild,P * l + q);
+    gamma_not_null = -iterative_refinement2(A_tild,P * l + q);
     int idx;
     for(int i = 0; i < not_null.size(); i++){
         idx = not_null[i];
@@ -611,7 +640,7 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
         }
     }
     VectorXd b(A.cols());
-    b = iterative_refinement(A,dd);
+    b = iterative_refinement2(A,dd);
     //b = A.llt().solve(dd);
     //b = A.colPivHouseholderQr().solve(dd);
     //b = Solver::iterative_refinement(A,grad_l);

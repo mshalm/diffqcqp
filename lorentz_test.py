@@ -69,7 +69,7 @@ qcqp_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0}
 n_testqcqp= 100
 NC = 8
 N = NC * 3
-scale = 1
+scale = 8
 for i in tqdm(range(n_testqcqp)):    
     #P = torch.rand((1,8,8),dtype = torch.double)
     P = torch.rand(N)*2 -1
