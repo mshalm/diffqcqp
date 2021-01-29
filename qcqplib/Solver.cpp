@@ -72,7 +72,7 @@ VectorXd Solver::solveQP( MatrixXd P, const VectorXd &q, const VectorXd &warm_st
     rho = std::sqrt(mu_prox*L)*std::pow(L/mu_prox,.4);
     tau_inc = std::pow(L/mu_prox,.15); tau_dec = tau_inc;
     q_prox = q;
-    P += (rho+mu_prox)* MatrixXd::Identity(P.rows(), P.cols());
+    P += (rho + mu_prox) * MatrixXd::Identity(P.rows(), P.cols());
     LLT<MatrixXd> chol = P.llt();
     Pinv.setIdentity(); chol.solveInPlace(Pinv);
     int rho_up = 0, cpt = 0;
@@ -190,27 +190,32 @@ void Solver::prox_circle(VectorXd &l, const VectorXd &l_n){//projection of l on 
     }
 }
 
+
+
 VectorXd Solver::solveQCQP( MatrixXd P, const VectorXd &q, const VectorXd &l_n, const VectorXd &warm_start, const double epsilon=1e-10, const double mu_prox = 1e-7, const int max_iter = 1000, const bool adaptative_rho=true){
     double L, rho, res_dual, res_prim, eps_rel, tau_dec, tau_inc, mu_thresh, alpha_relax;
     mu_thresh = 10.; alpha_relax = 1.5;
     eps_rel = 1e-4;
     MatrixXd Pinv(P.rows(), P.cols());
-    VectorXd q_prox(q.size()),l(q.size()), Plqu (q.size());
+    VectorXd q_prox(q.size()), l(q.size()), Plqu(q.size());
     VectorXd u = VectorXd::Zero(q.size());
     VectorXd l_2 = VectorXd::Zero(q.size());VectorXd l_2_pred = VectorXd::Zero(q.size());
     l = warm_start;
-    L = Solver::power_iteration(P,epsilon, 100);
-    rho = std::sqrt(mu_prox*L)*std::pow(L/mu_prox,.4);
-    tau_dec = std::pow(L/mu_prox,.15); tau_inc = tau_dec;
+    L = Solver::power_iteration(P, epsilon, 100);
+    rho = std::sqrt(mu_prox * L) * std::pow(L / mu_prox, .4);
+    tau_dec = std::pow(L / mu_prox, .15);
+    tau_inc = tau_dec;
     q_prox = q;
-    P +=(rho+mu_prox)*MatrixXd::Identity(P.rows(), P.cols());
+    P += (rho + mu_prox) * MatrixXd::Identity(P.rows(), P.cols());
     LLT<MatrixXd> chol = P.llt();
-    Pinv.setIdentity(); chol.solveInPlace(Pinv);
+    Pinv.setIdentity();
+    chol.solveInPlace(Pinv);
+
     int rho_up = 0, cpt=0;
     for(int i = 0; i< max_iter; i++){
-        l = Pinv*(rho*l_2-u-q_prox);
-        q_prox = q - mu_prox*l;
-        l_2 = alpha_relax*l + (1-alpha_relax)*l_2+u/rho;
+        l = Pinv * (rho * l_2 - u - q_prox);
+        q_prox = q - mu_prox * l;
+        l_2 = alpha_relax * l + (1 - alpha_relax) * l_2 + u / rho;
         Solver::prox_circle(l_2,l_n);
         u += rho*(alpha_relax*l + (1-alpha_relax)*l_2_pred-l_2);
         Plqu = l_2-l_2_pred;
@@ -253,6 +258,9 @@ VectorXd Solver::solveQCQP( MatrixXd P, const VectorXd &q, const VectorXd &l_n, 
     return l_2;
 }
 
+
+
+
 VectorXd Solver::dualFromPrimalQCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l_n, const VectorXd &l, const double &epsilon=1e-10){
     VectorXd gamma(l_n.size()),slack(l_n.size()),l_2d(2) ;
     MatrixXd  A = MatrixXd::Zero(l.size(), l_n.size());
@@ -287,6 +295,8 @@ VectorXd Solver::dualFromPrimalQCQP(const MatrixXd &P, const VectorXd &q, const 
     }
     return gamma;
 }
+
+
 
 VectorXd Solver::solveDerivativesQCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l_n, const VectorXd &l, const VectorXd &gamma, const VectorXd &grad_l, const double &epsilon){
     int nb_contacts = l_n.size();
@@ -360,6 +370,207 @@ std::tuple<MatrixXd,MatrixXd> Solver::getE12QCQP(const VectorXd &l_n, const Vect
     }
     return std::make_tuple(E1,E2);
 }
+
+
+void Solver::prox_lorentz(VectorXd &l)
+{//projection of l onto Lorentz cone |l_ti| <= l_ni
+    int nb_contacts;
+    double norm_lfi;
+    double mag;
+    double mag_normed;
+    VectorXd l_fi(2);
+    nb_contacts = l.size() / 3;
+    for (int i = 0; i<nb_contacts; i++)
+    {
+        l_fi(0) = l(nb_contacts + 2 * i);
+        l_fi(1) = l(nb_contacts + 2 * i + 1);
+        norm_lfi = l_fi.norm();
+        if (norm_lfi > l(i))
+        {
+            if (norm_lfi > -l(i))
+            {
+                mag = (l(i) + norm_lfi) / 2.0;
+                l(i) = mag;
+                mag_normed = mag / norm_lfi;
+                l(nb_contacts + 2 * i) *= mag_normed;
+                l(nb_contacts + 2 * i + 1) *= mag_normed;
+            }
+            else
+            {
+                l(i) = 0.0;
+                l(nb_contacts + 2 * i) = 0.0;
+                l(nb_contacts + 2 * i + 1) = 0.0;
+            }
+        }
+    }
+}
+
+
+VectorXd Solver::solveLCQP( MatrixXd P, const VectorXd &q, const VectorXd &warm_start, const double epsilon=1e-10, const double mu_prox = 1e-7, const int max_iter = 1000, const bool adaptative_rho=true){
+    double L, rho, res_dual, res_prim, eps_rel, tau_dec, tau_inc, mu_thresh, alpha_relax;
+    mu_thresh = 10.; alpha_relax = 1.5;
+    eps_rel = 1e-4;
+    MatrixXd Pinv(P.rows(), P.cols());
+    VectorXd q_prox(q.size()), l(q.size()), Plqu(q.size());
+    VectorXd u = VectorXd::Zero(q.size());
+    VectorXd l_2 = VectorXd::Zero(q.size());VectorXd l_2_pred = VectorXd::Zero(q.size());
+    l = warm_start;
+    L = Solver::power_iteration(P, epsilon, 100);
+    rho = std::sqrt(mu_prox * L) * std::pow(L / mu_prox, .4);
+    tau_dec = std::pow(L / mu_prox, .15);
+    tau_inc = tau_dec;
+    q_prox = q;
+    P += (rho + mu_prox) * MatrixXd::Identity(P.rows(), P.cols());
+    LLT<MatrixXd> chol = P.llt();
+    Pinv.setIdentity();
+    chol.solveInPlace(Pinv);
+
+    int rho_up = 0, cpt=0;
+    for(int i = 0; i< max_iter; i++){
+        l = Pinv * (rho * l_2 - u - q_prox);
+        q_prox = q - mu_prox * l;
+        l_2 = alpha_relax * l + (1 - alpha_relax) * l_2 + u / rho;
+        Solver::prox_lorentz(l_2);
+        u += rho*(alpha_relax*l + (1-alpha_relax)*l_2_pred-l_2);
+        Plqu = l_2-l_2_pred;
+        res_dual = rho*Plqu.lpNorm<Infinity>();
+        res_prim = (l_2-(alpha_relax*l + (1-alpha_relax)*l_2_pred)).lpNorm<Infinity>();
+        l_2_pred = l_2;
+        if( res_prim < epsilon + eps_rel*l.norm() && res_dual < epsilon ){
+            break;
+        }
+        if (adaptative_rho){
+            if( res_prim > mu_thresh*res_dual){//rho needs to be increased
+                if(cpt%5 ==0){// limits the frequency of rho update to every 5 iterations
+                    if (rho_up ==-1){
+                        tau_inc = 1+.8*(tau_inc-1);
+                    }
+                    P += rho*(tau_inc-1)*MatrixXd::Identity(P.rows(), P.cols());
+                    rho *= tau_inc;
+                    chol = P.llt();
+                    Pinv.setIdentity();chol.solveInPlace(Pinv);
+                    rho_up= 1;
+                }
+                cpt++;
+                
+            }
+            else if ( res_dual > mu_thresh*res_prim){
+                if(cpt%5 ==0){
+                    if (rho_up ==1){
+                        tau_dec = 1+.8*(tau_dec-1);
+                    }
+                    P +=rho*(1./tau_dec-1)*MatrixXd::Identity(P.rows(), P.cols());
+                    rho /= tau_dec;
+                    chol = P.llt();
+                    Pinv.setIdentity(); chol.solveInPlace(Pinv);
+                    rho_up=-1;
+                }
+                cpt++;
+            }
+        }
+    };
+    return l_2;
+}
+
+VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const VectorXd &gamma, const VectorXd &grad_l, const double &epsilon){
+    int nb_contacts = l.size() / 3;
+    VectorXd slack(nb_contacts);
+    double norm_lfi;
+    VectorXd l_fi(2);
+    MatrixXd C = MatrixXd::Zero(3*nb_contacts,nb_contacts);
+    MatrixXd D_tild = MatrixXd::Zero(3*nb_contacts, 3*nb_contacts);
+    for(int i = 0; i < nb_contacts; i++){
+        l_fi(0) = l(nb_contacts + 2*i);
+        l_fi(1) = l(nb_contacts + 2*i+1);
+        norm_lfi = l_fi.squaredNorm();
+        slack(i) = norm_lfi - (l(i) * l(i));
+        C(i, i) = - 2 * l(i);
+        C(nb_contacts + 2*i, i) = 2 * l(nb_contacts + 2*i);
+        C(nb_contacts + 2*i+1, i) = 2 * l(nb_contacts + 2*i+1);
+        D_tild(i, i) = -2 * gamma(i);
+        D_tild(nb_contacts + 2 * i, nb_contacts + 2 * i) = 2 * gamma(i);
+        D_tild(nb_contacts + 2 * i + 1,nb_contacts + 2 * i + 1) = 2 * gamma(i);
+    }
+    std::vector<int> not_null;
+    for (int i = 0; i<nb_contacts; i++){
+        if(slack(i)>-1e-10){
+            not_null.push_back(i);
+        }
+    }
+    MatrixXd A_tild = MatrixXd::Zero(not_null.size(),not_null.size());
+    MatrixXd B = gamma.asDiagonal()*(C.transpose());
+    MatrixXd B_tild(not_null.size(),B.cols()), C_tild(C.rows(), not_null.size());
+    for(int i = 0; i< not_null.size(); i++){
+        A_tild(i,i) = slack(not_null[i]);
+        B_tild.row(i) = B.row(not_null[i]);
+        C_tild.col(i) = C.col(not_null[i]);
+    }
+    D_tild = D_tild+P;
+    MatrixXd A(l.size()+not_null.size(),l.size()+not_null.size());
+    A.topLeftCorner(not_null.size(),not_null.size()) = A_tild;
+    A.topRightCorner(not_null.size(),l.size()) = B_tild;
+    A.bottomLeftCorner(l.size(),not_null.size()) = C_tild;
+    A.bottomRightCorner(l.size(),l.size()) = D_tild;
+    A.transposeInPlace();
+    
+    VectorXd dd(A.cols());
+    for(int i = 0 ; i< dd.size(); i++){
+        if(i<not_null.size()){
+            dd(i) = 0.;
+        }
+        else{
+            dd(i) = grad_l(i-not_null.size());
+        }
+    }
+    VectorXd b(A.cols());
+    b = Solver::iterative_refinement(A,dd);
+    VectorXd bl = VectorXd::Zero(l.size());
+    for (int i = 0; i < bl.size(); i++)
+    {
+        bl(i) = b(i+not_null.size());
+    }
+    return bl;
+}
+
+VectorXd Solver::dualFromPrimalLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const double &epsilon=1e-10){
+    int nb_contacts;
+    nb_contacts = l.size() / 3;
+    VectorXd gamma(nb_contacts), slack(nb_contacts), l_fi(2);
+    MatrixXd  A = MatrixXd::Zero(l.size(), nb_contacts);
+    std::vector<int> not_null;
+
+    for(int i = 0; i < nb_contacts; i++){
+        A(i, i) = - 2 * l(i);
+        A(nb_contacts + 2 * i, i) = 2 * l(nb_contacts + 2 * i);
+        A(nb_contacts + 2 * i + 1,i) = 2 * l(nb_contacts + 2 * i + 1);
+        l_fi(0) = l(nb_contacts + 2 * i);
+        l_fi(1) = l(nb_contacts + 2 * i + 1);
+        slack(i) = l(i) - l_fi.norm();
+        if(slack(i) > epsilon){
+            gamma(i) = 0;
+        }
+        else
+        {
+            not_null.push_back(i);
+        }
+    }
+
+    MatrixXd A_tild(A.rows(), not_null.size());
+    for (int i = 0; i < not_null.size(); ++i) {
+        A_tild.col(i) = A.col(not_null[i]);
+    }
+
+    VectorXd gamma_not_null(not_null.size());
+    gamma_not_null = -(A_tild.transpose() * A_tild).llt().solve(A_tild.transpose()*(P*l+q));
+    int idx;
+    for(int i = 0; i < not_null.size(); i++){
+        idx = not_null[i];
+        gamma(idx) = gamma_not_null(i);
+    }
+    return gamma;
+}
+
+
 
 int Solver::test(){
     typedef std::chrono::high_resolution_clock Time;

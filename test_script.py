@@ -26,16 +26,16 @@ class QCQP_cvxpy(nn.Module):
         super().__init__()
         self.eps = eps
         self.max_iter = max_iter
-    
-    def forward(self,P,q,l_n,mu):
-        N = q.size()[1]
+        
+
+    def initLayer(self):
+        N = 8
         l_t = cp.Variable(N)
         A = cp.Parameter((N, N),nonneg= True)
         b = cp.Parameter(N)
         c = cp.Parameter(N//2, nonneg=True)
         #Gs = []
         #for i in range(N//2):
-            
         constraints = [cp.SOC(c[i], l_t[2*i:2*(i+1)]) for i in range(N//2)]
         #constraints = []
         #objective = cp.Minimize(0.5 * cp.quad_form(l_t,A) + b.T@l_t )
@@ -43,7 +43,10 @@ class QCQP_cvxpy(nn.Module):
         problem = cp.Problem(objective, constraints)
         assert problem.is_dpp()
 
-        cvxpylayer = CvxpyLayer(problem, parameters=[A, b, c], variables=[l_t])
+        self.cvxpylayer = CvxpyLayer(problem, parameters=[A, b, c], variables=[l_t])
+    
+    def forward(self,P,q,l_n,mu):
+        self.initLayer()
         # solve the problem
         k=1e-11 #regularization of P to get Cholesky's decomposition 
         k=0.
@@ -51,7 +54,7 @@ class QCQP_cvxpy(nn.Module):
         P_sqrt = torch.tensor(P_sqrt).unsqueeze(0)
         #L = torch.transpose(torch.cholesky(P+k*torch.eye(P.size()[1])),1,2)
         #print(L.size(), q.size(), mu.size(), l_n.size())
-        solution, = cvxpylayer(P_sqrt,q.squeeze(2),(mu*l_n).squeeze(2),solver_args={'eps': self.eps,'max_iters':self.max_iter})
+        solution, = self.cvxpylayer(P_sqrt,q.squeeze(2),(mu*l_n).squeeze(2),solver_args={'eps': self.eps,'max_iters':self.max_iter})
         #solution, = cvxpylayer(P,q.squeeze(2),(mu*l_n).squeeze(2),solver_args={'eps': self.eps,'max_iters':self.max_iter})
         #print(solution)
         return solution

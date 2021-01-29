@@ -48,11 +48,31 @@ std::tuple<MatrixXd,MatrixXd,VectorXd> solveDerivativesQCQP(const py::EigenDRef<
     return std::make_tuple(E1,E2,blgamma);
 }
 
+VectorXd solveLCQP( const py::EigenDRef<const MatrixXd> &P, const py::EigenDRef<const VectorXd> &q, const py::EigenDRef<const VectorXd> &warm_start,const double epsilon=1e-10,const double mu_prox = 1e-7, const int max_iter = 1000, const bool adaptative_rho = true){
+    Solver solver;
+    VectorXd solution(q.size());
+    solution = solver.solveLCQP(P,q,warm_start,epsilon,mu_prox,max_iter,adaptative_rho);
+    return solution;
+}
+
+std::tuple<VectorXd,VectorXd> solveDerivativesLCQP(const py::EigenDRef<const MatrixXd> &P, const py::EigenDRef<const VectorXd> &q, const py::EigenDRef<const VectorXd> &l, const py::EigenDRef<const VectorXd> &grad_l, const double epsilon =1e-10){
+    Solver solver;
+    int n_contacts = l.size() / 3;
+    VectorXd gamma(n_contacts), bl(n_contacts * 3);
+    gamma = solver.dualFromPrimalLCQP(P,q,l,epsilon);
+    bl = solver.solveDerivativesLCQP(P,q,l,gamma,grad_l,epsilon);
+    return std::make_tuple(bl,gamma);
+}
+
+
 
 PYBIND11_MODULE(pybindings, m) {
     m.doc() = "module solving QCQP and QP with ADMM, and computing the derivatives of the solution using implicit differentiation of KKT optimality conditions";
     m.def("solveQP", &solveQP, "A function which solves a QP problem with a regularized ADMM algorithm",py::arg("P"), py::arg("q"),py::arg("warm_start"),py::arg("epsilon") = 1e-10,py::arg("mu_prox")= 1e-7,py::arg("max_iter")= 1000,py::arg("adaptative_rho")= true, py::return_value_policy::reference_internal );
     m.def("solveQCQP", &solveQCQP, "A function which solves a QCQP problem with a regularized ADMM algorithm",py::arg("P"), py::arg("q"), py::arg("l_n"),py::arg("mu"), py::arg("warm_start"),py::arg("epsilon")= 1e-10,py::arg("mu_prox")= 1e-7,py::arg("max_iter")= 1000,py::arg("adaptative_rho")= true, py::return_value_policy::reference_internal );
-    m.def("solveDerivativesQP", &solveDerivativesQP, "A function which solves the differentiated KKT system of a QP",py::arg("P"), py::arg("q"), py::arg("l"), py::arg("grad_l"), py::arg("epsilon")=1e-10 );
+    m.def("solveLCQP", &solveLCQP, "A function which solves a QCQP, Lorentz-cone-constrained problem with regularized ADMM algorithm",py::arg("P"), py::arg("q"), py::arg("warm_start"),py::arg("epsilon")= 1e-10,py::arg("mu_prox")= 1e-7,py::arg("max_iter")= 1000,py::arg("adaptative_rho")= true, py::return_value_policy::reference_internal );
+    m.def("solveDerivativesQP", &solveDerivativesQP, "A function which solves the differentiated KKT system of a QP",py::arg("P"), py::arg("q"), py::arg("l"), py::arg("grad_l"), py::arg("epsilon")=1e-10);
     m.def("solveDerivativesQCQP", &solveDerivativesQCQP, "A function which solves the differentiated KKT system of a QCQP",py::arg("P"), py::arg("q"), py::arg("l_n"),py::arg("mu"), py::arg("l"), py::arg("grad_l"), py::arg("epsilon")=1e-10 );
+    m.def("solveDerivativesLCQP", &solveDerivativesLCQP, "A function which solves the differentiated KKT system of a Lorentz-cone-constrained QCQP",py::arg("P"), py::arg("q"), py::arg("l"), py::arg("grad_l"), py::arg("epsilon")=1e-10 );
+
 }

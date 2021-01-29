@@ -11,10 +11,11 @@ import torch
 from torch.autograd import Function, Variable
 import torch.nn as nn
 torch.set_default_dtype(torch.double)
+import pdb
 
 import torch.autograd.profiler as profiler
 
-from build.pybindings import solveQP, solveQCQP, solveDerivativesQP, solveDerivativesQCQP
+from build.pybindings import solveQP, solveQCQP, solveLCQP, solveDerivativesQP, solveDerivativesQCQP, solveDerivativesLCQP
 
 import time
 import timeit
@@ -93,3 +94,39 @@ class QCQPFn2(Function):
         if ctx.needs_input_grad[3]:
             grad_mu = torch.bmm(E1,dgamma)
         return grad_P, grad_q, grad_l_n, grad_mu, None, None, None, None
+
+class LCQPFn2(Function):
+    
+    @staticmethod
+    def forward(ctx,P,q,warm_start,eps,max_iter,mu_prox =1e-7):
+        durations = {"power iter":[], "iters":[], "l update":[],"u update":[],"res update":[], "batch prox":[]}
+        batch_size = q.size()[0]
+        l_2 =torch.zeros(q.size())
+        adaptative_rho =True
+        for i in range(batch_size):
+            t0 = time.time()
+            l_2[i,:,0] = torch.from_numpy(solveLCQP(P[i,:,:].detach().numpy(),q[i,:,:].detach().numpy(), warm_start[i,:,:].detach().numpy(), eps, mu_prox, max_iter,adaptative_rho))
+        ctx.save_for_backward(P,q,l_2)
+        return l_2
+    
+    @staticmethod    
+    def backward(ctx, grad_l):
+        '''
+        Compute derivatives of the solution of the QCQP with respect to 
+        '''
+        #pdb.set_trace()
+        P,q,l = ctx.saved_tensors
+        num_contact = q.size()[1] // 3
+        batch_size = q.size()[0]
+        grad_P, grad_q = None, None
+        dl = torch.zeros(l.size())
+        for i in range(batch_size):
+            bl, gamma = solveDerivativesLCQP(P[i,:,:].detach().numpy(),q[i,:,:].detach().numpy(),l[i,:,:].detach().numpy(),grad_l[i,:,:].detach().numpy())
+            bl = torch.from_numpy(bl)
+            dl[i,:,0] = bl
+        if ctx.needs_input_grad[0]:
+            grad_P = -torch.bmm(dl, torch.transpose(l,1,2))
+        if ctx.needs_input_grad[1]:
+            grad_q = - dl
+        #print(grad_P.size(),grad_q.size())
+        return grad_P, grad_q, None, None, None, None
