@@ -20,16 +20,17 @@ plt.style.use('bmh')
 import pdb
 
 class QCQP_cvxpy(nn.Module):
-    def __init__(self,eps=1e-14, max_iter = 100):
+    def __init__(self,NC,eps=1e-14, max_iter = 100):
         '''
         '''
         super().__init__()
         self.eps = eps
         self.max_iter = max_iter
+        self.NC = NC
         self.initLayer()
 
     def initLayer(self):
-        N = 8
+        NC = self.NC
         N = NC * 3
         l = cp.Variable(N)
         A = cp.Parameter((N, N),nonneg= True)
@@ -65,10 +66,10 @@ class QCQP_cvxpy(nn.Module):
 
 cvxpy_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0}
 qcqp_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0}
-n_testqcqp= 10
-NC = 8
+n_testqcqp= 100
+NC = 4
 N = NC * 3
-scale = 8
+scale = 5
 for i in tqdm(range(n_testqcqp)):    
     #P = torch.rand((1,8,8),dtype = torch.double)
     P = torch.rand(N)*2 -1
@@ -107,7 +108,7 @@ for i in tqdm(range(n_testqcqp)):
 
     #qcqp_time['forward']+= [t1-t0]
     #qcqp_time['backward']+= [t3-t2]
-    qcqp2 = QCQP_cvxpy(eps=1e-10,max_iter = 1000000)
+    qcqp2 = QCQP_cvxpy(NC, eps=1e-10,max_iter = 1000000)
     t4 = time()
     l1 = qcqp2(P,q)
     cvxpy_time['forward']+= [timeit.timeit(lambda:qcqp2(P,q),number = 10)/10.]

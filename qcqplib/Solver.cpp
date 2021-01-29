@@ -472,66 +472,6 @@ VectorXd Solver::solveLCQP( MatrixXd P, const VectorXd &q, const VectorXd &warm_
     return l_2;
 }
 
-VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const VectorXd &gamma, const VectorXd &grad_l, const double &epsilon){
-    int nb_contacts = l.size() / 3;
-    VectorXd slack(nb_contacts);
-    double norm_lfi;
-    VectorXd l_fi(2);
-    MatrixXd C = MatrixXd::Zero(3*nb_contacts,nb_contacts);
-    MatrixXd D_tild = MatrixXd::Zero(3*nb_contacts, 3*nb_contacts);
-    for(int i = 0; i < nb_contacts; i++){
-        l_fi(0) = l(nb_contacts + 2*i);
-        l_fi(1) = l(nb_contacts + 2*i+1);
-        norm_lfi = l_fi.squaredNorm();
-        slack(i) = norm_lfi - (l(i) * l(i));
-        C(i, i) = - 2 * l(i);
-        C(nb_contacts + 2*i, i) = 2 * l(nb_contacts + 2*i);
-        C(nb_contacts + 2*i+1, i) = 2 * l(nb_contacts + 2*i+1);
-        D_tild(i, i) = -2 * gamma(i);
-        D_tild(nb_contacts + 2 * i, nb_contacts + 2 * i) = 2 * gamma(i);
-        D_tild(nb_contacts + 2 * i + 1,nb_contacts + 2 * i + 1) = 2 * gamma(i);
-    }
-    std::vector<int> not_null;
-    for (int i = 0; i<nb_contacts; i++){
-        if(slack(i)>-1e-10){
-            not_null.push_back(i);
-        }
-    }
-    MatrixXd A_tild = MatrixXd::Zero(not_null.size(),not_null.size());
-    MatrixXd B = gamma.asDiagonal()*(C.transpose());
-    MatrixXd B_tild(not_null.size(),B.cols()), C_tild(C.rows(), not_null.size());
-    for(int i = 0; i< not_null.size(); i++){
-        A_tild(i,i) = slack(not_null[i]);
-        B_tild.row(i) = B.row(not_null[i]);
-        C_tild.col(i) = C.col(not_null[i]);
-    }
-    D_tild = D_tild+P;
-    MatrixXd A(l.size()+not_null.size(),l.size()+not_null.size());
-    A.topLeftCorner(not_null.size(),not_null.size()) = A_tild;
-    A.topRightCorner(not_null.size(),l.size()) = B_tild;
-    A.bottomLeftCorner(l.size(),not_null.size()) = C_tild;
-    A.bottomRightCorner(l.size(),l.size()) = D_tild;
-    A.transposeInPlace();
-    
-    VectorXd dd(A.cols());
-    for(int i = 0 ; i< dd.size(); i++){
-        if(i<not_null.size()){
-            dd(i) = 0.;
-        }
-        else{
-            dd(i) = grad_l(i-not_null.size());
-        }
-    }
-    VectorXd b(A.cols());
-    b = Solver::iterative_refinement(A,dd);
-    VectorXd bl = VectorXd::Zero(l.size());
-    for (int i = 0; i < bl.size(); i++)
-    {
-        bl(i) = b(i+not_null.size());
-    }
-    return bl;
-}
-
 VectorXd Solver::dualFromPrimalLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const double &epsilon=1e-10){
     int nb_contacts;
     nb_contacts = l.size() / 3;
@@ -561,7 +501,10 @@ VectorXd Solver::dualFromPrimalLCQP(const MatrixXd &P, const VectorXd &q, const 
     }
 
     VectorXd gamma_not_null(not_null.size());
-    gamma_not_null = -(A_tild.transpose() * A_tild).llt().solve(A_tild.transpose()*(P*l+q));
+    //gamma_not_null = -(A_tild.transpose() * A_tild).llt().solve(A_tild.transpose()*(P*l+q));
+    //gamma_not_null = -(A_tild.transpose() * A_tild).colPivHouseholderQr().solve(A_tild.transpose()*(P*l+q));
+    //gamma_not_null = -A_tild.colPivHouseholderQr().solve(P * l + q);
+    gamma_not_null = -iterative_refinement(A_tild,P * l + q);
     int idx;
     for(int i = 0; i < not_null.size(); i++){
         idx = not_null[i];
@@ -569,6 +512,79 @@ VectorXd Solver::dualFromPrimalLCQP(const MatrixXd &P, const VectorXd &q, const 
     }
     return gamma;
 }
+
+
+VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const VectorXd &gamma, const VectorXd &grad_l, const double &epsilon){
+    int nb_contacts = l.size() / 3;
+    VectorXd slack(nb_contacts);
+    double norm_lfi;
+    VectorXd l_fi(2);
+    MatrixXd C = MatrixXd::Zero(3*nb_contacts,nb_contacts);
+    MatrixXd D_tild = MatrixXd::Zero(3*nb_contacts, 3*nb_contacts);
+    for(int i = 0; i < nb_contacts; i++){
+        l_fi(0) = l(nb_contacts + 2*i);
+        l_fi(1) = l(nb_contacts + 2*i+1);
+        norm_lfi = l_fi.squaredNorm();
+        slack(i) = norm_lfi - (l(i) * l(i));
+        C(i, i) = - 2 * l(i);
+        C(nb_contacts + 2*i, i) = 2 * l(nb_contacts + 2*i);
+        C(nb_contacts + 2*i+1, i) = 2 * l(nb_contacts + 2*i+1);
+        D_tild(i, i) = -2 * gamma(i);
+        D_tild(nb_contacts + 2 * i, nb_contacts + 2 * i) = 2 * gamma(i);
+        D_tild(nb_contacts + 2 * i + 1,nb_contacts + 2 * i + 1) = 2 * gamma(i);
+    }
+    std::vector<int> not_null;
+    for (int i = 0; i<nb_contacts; i++){
+        if(slack(i)>-1e-10){
+            not_null.push_back(i);
+        }
+    }
+    //MatrixXd A_tild = MatrixXd::Zero(not_null.size(),not_null.size());
+    //MatrixXd A_tild_inv = MatrixXd::Zero(not_null.size(),not_null.size());
+    //MatrixXd B = gamma.asDiagonal()*(C.transpose());
+    MatrixXd B = (C.transpose());
+    MatrixXd B_tild(not_null.size(),B.cols()), C_tild(C.rows(), not_null.size());
+    for(int i = 0; i< not_null.size(); i++){
+        //A_tild(i,i) = 1. / slack(not_null[i]);
+        //A_tild_inv(i,i) = 1. / (slack(not_null[i]) );
+        B_tild.row(i) = B.row(not_null[i]);
+        C_tild.col(i) = C.col(not_null[i]);
+    }
+    D_tild = D_tild+P;
+    MatrixXd A(l.size()+not_null.size(),l.size()+not_null.size());
+    //A.topLeftCorner(not_null.size(),not_null.size()) = A_tild;
+    A.topRightCorner(not_null.size(),l.size()) = B_tild;
+    A.bottomLeftCorner(l.size(),not_null.size()) = C_tild;
+    A.bottomRightCorner(l.size(),l.size()) = D_tild;
+    
+
+    //MatrixXd A(l.size(),l.size());
+    //A = D_tild - (C_tild * (A_tild_inv * D_tild));
+    A.transposeInPlace();
+
+    VectorXd dd(A.cols());
+    for(int i = 0 ; i< dd.size(); i++){
+        if(i<not_null.size()){
+            dd(i) = 0.;
+        }
+        else{
+            dd(i) = grad_l(i-not_null.size());
+        }
+    }
+    VectorXd b(A.cols());
+    b = Solver::iterative_refinement(A,dd);
+    //b = A.llt().solve(dd);
+    //b = A.colPivHouseholderQr().solve(dd);
+    //b = Solver::iterative_refinement(A,grad_l);
+    
+    VectorXd bl = VectorXd::Zero(l.size());
+    for (int i = 0; i < bl.size(); i++)
+    {
+        bl(i) = b(i+not_null.size());
+    }
+    return bl;
+}
+
 
 
 
