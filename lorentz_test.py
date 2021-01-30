@@ -47,16 +47,15 @@ class QCQP_cvxpy(nn.Module):
 
         self.cvxpylayer = CvxpyLayer(problem, parameters=[A, b], variables=[l])
     
-    def forward(self,P,q):
+    def forward(self,P_sqrt,q):
         
         # solve the problem
         k=1e-11 #regularization of P to get Cholesky's decomposition 
         k=0.
-        P_sqrt = scipy.linalg.sqrtm(P.detach().numpy().copy()[0,:,:])
-        P_sqrt = torch.tensor(P_sqrt).unsqueeze(0)
+        b = -P_sqrt.transpose(1,2).bmm(q)
         #L = torch.transpose(torch.cholesky(P+k*torch.eye(P.size()[1])),1,2)
         #print(L.size(), q.size(), mu.size(), l_n.size())
-        solution, = self.cvxpylayer(P_sqrt,q.squeeze(2),solver_args={'eps': self.eps,'max_iters':self.max_iter})
+        solution, = self.cvxpylayer(P_sqrt,b.squeeze(2),solver_args={'eps': self.eps,'max_iters':self.max_iter})
         #solution, = cvxpylayer(P,q.squeeze(2),(mu*l_n).squeeze(2),solver_args={'eps': self.eps,'max_iters':self.max_iter})
         #print(solution)
         return solution
@@ -70,45 +69,55 @@ comp = {'abs_err': [], 'rel_err': [], 'abs_err_grad': [], 'rel_err_grad': [], 'o
 n_testqcqp= 100
 NC = 8
 N = NC * 3
-scale = 4
+scale = 3
 qcqp2 = QCQP_cvxpy(NC, eps=1e-10,max_iter = 1000000)
-lcqp = LCQPFn2().apply
-def qcqpfunct(Q, p):
+#lcqp = 
+def qcqpfunct(P_sqrt, q):
     warm_start = torch.rand(q.size())
-    return lcqp(P,q,warm_start,1e-10,1000000)
+    #pdb.set_trace()
+    P = P_sqrt ** 2
+    b = -P_sqrt.transpose(1,2).bmm(q)
+    l1 = LCQPFn2().apply(P,b,warm_start,1e-10,1000000)
+    return l1
 
-def cvxpyfunct(Q, p):
+def cvxpyfunct(P_sqrt, q):
     warm_start = torch.rand(q.size())
-    return qcqp2(P,q).unsqueeze(2)
+    return qcqp2(P_sqrt,q).unsqueeze(2)
 
+def lossfun(l, P_sqrt, q):
+    return 0.5 * torch.sum((P_sqrt.bmm(l) - q) ** 2)
 
-def QCQP_eval(P, q, func, timed):
-    P_qcqp = torch.nn.parameter.Parameter(P.detach().clone(), requires_grad= True)
+def QCQP_eval(P_sqrt, q, func, timed):
+    P_sqrt_qcqp = torch.nn.parameter.Parameter(P_sqrt.detach().clone(), requires_grad= True)
     q_qcqp = torch.nn.parameter.Parameter(q.detach().clone(), requires_grad= True)
     lr = 1e-4
-    optimizer_qcqp = optim.Adam([P_qcqp,q_qcqp], lr=lr)
-    l1 = func(P_qcqp,q_qcqp)
+    #pdb.set_trace()
+    optimizer_qcqp = optim.Adam([P_sqrt_qcqp,q_qcqp], lr=lr)
+    #optimizer_qcqp.zero_grad()
+    l1 = func(P_sqrt_qcqp, q_qcqp)
     fnan = 0
-    if np.any(np.isnan(l1.detach().numpy())):
+    if np.any(np.isnan(l1.clone().detach().numpy())):
         fnan += 1
     tf = 0
     if timed:
-        tf = timeit.timeit(lambda: func(P_qcqp,q_qcqp),number = 10)/10.
+        tf = timeit.timeit(lambda: func(P_sqrt_qcqp,q_qcqp),number = 10)/10.
+    L1 = lossfun(l1, P_sqrt_qcqp, q_qcqp)
+    if L1 < 0:
+        pdb.set_trace()
+    loss = L1.clone().detach().numpy().item()
     
-    L1 = l1.transpose(1,2).bmm(0.5 * P_qcqp.bmm(l1) + q_qcqp) + 0.5 * q_qcqp.transpose(1,2).bmm(q_qcqp)
-    loss = L1.detach().numpy().item()
-    optimizer_qcqp.zero_grad()
     tb = 0
     if timed:
         tb = timeit.timeit(lambda:L1.backward(retain_graph=True),number = 10)/10.
     L1.backward()
+    #pdb.set_trace()
     bnan = 0
-    if np.any(np.isnan(P_qcqp.grad.detach().numpy())) or np.any(np.isnan(q_qcqp.grad.detach().numpy())):
+    if np.any(np.isnan(P_sqrt_qcqp.grad.detach().numpy())) or np.any(np.isnan(q_qcqp.grad.detach().numpy())):
         bnan += 1
-    grad = torch.cat((P_qcqp.grad,P_qcqp.grad),dim=2).detach().numpy()
+    grad = torch.cat((P_sqrt_qcqp.grad,q_qcqp.grad),dim=2).detach().numpy()
     optimizer_qcqp.step()
-    l1 = func(P_qcqp,q_qcqp)
-    L1 = l1.transpose(1,2).bmm(0.5 * P_qcqp.bmm(l1) + q_qcqp) + 0.5 * q_qcqp.transpose(1,2).bmm(q_qcqp)
+    l1 = func(P_sqrt_qcqp,q_qcqp)
+    L1 = lossfun(l1, P_sqrt_qcqp, q_qcqp)
     drop = loss - L1.detach().numpy().item()
     return (fnan, bnan, tf, tb, loss, grad, drop)
 
@@ -119,9 +128,11 @@ for i in tqdm(range(n_testqcqp)):
     P_sqrt = torch.diag(torch.pow(10,P/2)).unsqueeze(0)
     P = torch.diag(torch.pow(10,P)).unsqueeze(0)
     q = torch.rand((1,N,1),dtype = torch.double)*2-1
-    q = P_sqrt.bmm(q)
+    q_pow = torch.rand((1,N,1),dtype = torch.double)*2-1
+    q_pow = torch.pow(10, q_pow / 2)
+    q = q = q * q_pow
     #P = torch.matmul(P, torch.transpose(P,1,2))
-    (fnan, bnan, tf, tb, loss, grad, drop) = QCQP_eval(P, q, qcqpfunct, True)
+    (fnan, bnan, tf, tb, loss, grad, drop) = QCQP_eval(P_sqrt, q, qcqpfunct, True)
     qcqp_time['fnan'] += fnan
     qcqp_time['bnan'] += bnan
     qcqp_time['forward']+= [tf]
@@ -130,7 +141,7 @@ for i in tqdm(range(n_testqcqp)):
     qcqp_time['obj'] += [loss]
     qcqp_time['drop'] += [drop] 
 
-    (fnan, bnan, tf, tb, loss, grad, drop) = QCQP_eval(P, q, cvxpyfunct, True)
+    (fnan, bnan, tf, tb, loss, grad, drop) = QCQP_eval(P_sqrt, q, cvxpyfunct, True)
     cvxpy_time['fnan'] += fnan
     cvxpy_time['bnan'] += bnan
     cvxpy_time['forward']+= [tf]
@@ -198,14 +209,15 @@ plt.hist(hist_vals)
 plt.xlabel('log10(absolute obj. err)')
 
 plt.figure(3)
-hist_vals = np.log10(np.array(comp['rel_err']))
+hist_vals = np.log10(np.array(comp['rel_err']) + 1e-16)
 
 
 plt.hist(hist_vals)
 plt.xlabel('log10(relative obj. err)')
 
 plt.figure(4)
-hist_vals = np.log10(np.array(qcqp_time['obj']))
+print(np.array(qcqp_time['obj']).min())
+hist_vals = np.log10(np.array(qcqp_time['obj'])+ 1e-16)
 
 plt.hist(hist_vals)
 plt.xlabel('log10(objective)')
@@ -229,9 +241,13 @@ plt.xlabel('log10(relative grad. err)')
 
 plt.figure(7)
 hist_vals = np.log10(np.array(qcqp_time['grad']))
+hist_vals2 = np.log10(np.array(cvxpy_time['grad']))
 
-plt.hist(hist_vals)
+plt.hist(hist_vals, alpha=0.5,label='ours')
+plt.hist(hist_vals2, alpha=0.5,label='cvxpy')
 plt.xlabel('log10(frobenius_norm(grad))')
+plt.legend(loc='upper right')
+
 
 plt.figure(8)
 hist_vals = np.array(comp['our_advantage'])
@@ -244,6 +260,15 @@ hist_vals = np.array(comp['our_rel_advantage'])
 
 plt.hist(hist_vals)
 plt.xlabel('(rel. performance difference)')
+
+plt.figure(10)
+hist_vals = np.log10(np.array(qcqp_time['drop']))
+hist_vals2 = np.log10(np.array(cvxpy_time['drop']))
+
+plt.hist(hist_vals, alpha=0.5,label='ours')
+plt.hist(hist_vals2, alpha=0.5,label='cvxpy')
+plt.xlabel('log10(\Delta loss), (more is better)')
+plt.legend(loc='upper right')
 
 
 

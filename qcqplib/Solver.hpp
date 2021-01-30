@@ -22,8 +22,7 @@ class Solver
 
     void prox_lorentz(VectorXd &l);
     VectorXd solveLCQP( MatrixXd P, const VectorXd &q, const VectorXd &warm_start, const double epsilon, const double mu_prox, const int max_iter,const bool adaptative_rho);
-    VectorXd dualFromPrimalLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const double &epsilon);
-    VectorXd solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const VectorXd &gamma, const VectorXd &grad_l, const double &epsilon);
+    VectorXd solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const VectorXd &grad_l, const double &epsilon);
     
     int test();
 

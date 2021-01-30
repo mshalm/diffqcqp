@@ -57,10 +57,7 @@ VectorXd solveLCQP( const py::EigenDRef<const MatrixXd> &P, const py::EigenDRef<
 
 VectorXd solveDerivativesLCQP(const py::EigenDRef<const MatrixXd> &P, const py::EigenDRef<const VectorXd> &q, const py::EigenDRef<const VectorXd> &l, const py::EigenDRef<const VectorXd> &grad_l, const double epsilon =1e-10){
     Solver solver;
-    int n_contacts = l.size() / 3;
-    VectorXd gamma(n_contacts), bl(n_contacts * 3);
-    bl = solver.solveDerivativesLCQP(P,q,l,gamma,grad_l,epsilon);
-    return bl;
+    return solver.solveDerivativesLCQP(P,q,l,grad_l,epsilon);
 }
 
 

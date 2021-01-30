@@ -108,14 +108,16 @@ class LCQPFn2(Function):
             t0 = time.time()
             l_2[i,:,0] = torch.from_numpy(solveLCQP(P[i,:,:].detach().numpy(),q[i,:,:].detach().numpy(), warm_start[i,:,:].detach().numpy(), eps, mu_prox, max_iter,adaptative_rho))
         ctx.save_for_backward(P,q,l_2)
+        #print('fwd')
         return l_2
     
     @staticmethod    
     def backward(ctx, grad_l):
         '''
-        Compute derivatives of the solution of the QCQP with respect to 
+        Compute derivatives of the solution of the Lorentz-constrained QCQP with respect to P, q
         '''
-        #pdb.set_trace()
+
+        #print('back')
         P,q,l = ctx.saved_tensors
         num_contact = q.size()[1] // 3
         batch_size = q.size()[0]
@@ -123,12 +125,12 @@ class LCQPFn2(Function):
         dl = torch.zeros(l.size())
         for i in range(batch_size):
             bl = solveDerivativesLCQP(P[i,:,:].detach().numpy(),q[i,:,:].detach().numpy(),l[i,:,:].detach().numpy(),grad_l[i,:,:].detach().numpy())
-            #if np.any(np.isnan(gamma)):
-            #    pdb.set_trace()
+            #print(bl.norm())
             bl = torch.from_numpy(bl)
             dl[i,:,0] = bl
         if ctx.needs_input_grad[0]:
             grad_P = -torch.bmm(dl, torch.transpose(l,1,2))
+            grad_P = 0.5 * (grad_P + grad_P.transpose(1,2))
         if ctx.needs_input_grad[1]:
             grad_q = - dl
         #print(grad_P.size(),grad_q.size())

@@ -4,7 +4,7 @@
 #include "Solver.hpp"
 
 #include <chrono>
-
+#include <iostream>
 using namespace std;
 using namespace Eigen;
 
@@ -501,152 +501,123 @@ VectorXd Solver::solveLCQP( MatrixXd P, const VectorXd &q, const VectorXd &warm_
     return l_2;
 }
 
-VectorXd Solver::dualFromPrimalLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const double &epsilon=1e-10){
-    int nb_contacts;
-    nb_contacts = l.size() / 3;
-    VectorXd gamma(nb_contacts), slack(nb_contacts), l_fi(2);
-    MatrixXd  A = MatrixXd::Zero(l.size(), nb_contacts);
-    std::vector<int> not_null;
-
-    for(int i = 0; i < nb_contacts; i++){
-        A(i, i) = - 2 * l(i);
-        A(nb_contacts + 2 * i, i) = 2 * l(nb_contacts + 2 * i);
-        A(nb_contacts + 2 * i + 1,i) = 2 * l(nb_contacts + 2 * i + 1);
-        l_fi(0) = l(nb_contacts + 2 * i);
-        l_fi(1) = l(nb_contacts + 2 * i + 1);
-        slack(i) = l(i) * l(i) - l_fi.squaredNorm();
-        if(slack(i) > epsilon){
-            gamma(i) = 0;
-        }
-        else
-        {
-            not_null.push_back(i);
-        }
-    }
-
-    MatrixXd A_tild(A.rows(), not_null.size());
-    for (int i = 0; i < not_null.size(); ++i) {
-        A_tild.col(i) = A.col(not_null[i]);
-    }
-
-    VectorXd gamma_not_null(not_null.size());
-    //gamma_not_null = -(A_tild.transpose() * A_tild).llt().solve(A_tild.transpose()*(P*l+q));
-    //gamma_not_null = -(A_tild.transpose() * A_tild).colPivHouseholderQr().solve(A_tild.transpose()*(P*l+q));
-    //gamma_not_null = -A_tild.colPivHouseholderQr().solve(P * l + q);
-    gamma_not_null = -iterative_refinement2(A_tild,P * l + q);
-    int idx;
-    for(int i = 0; i < not_null.size(); i++){
-        idx = not_null[i];
-        gamma(idx) = gamma_not_null(i);
-    }
-    return gamma;
-}
 
 
-VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const VectorXd &gamma, const VectorXd &grad_l, const double &epsilon){
+
+VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const VectorXd &grad_l, const double &epsilon){
     int nb_contacts = l.size() / 3;
     VectorXd slack(nb_contacts);
     double norm_lfi;
     VectorXd l_fi(2);
-    //MatrixXd D = MatrixXd::Zero(3*nb_contacts, 3*nb_contacts);
-    VectorXd D_diag = VectorXd::Zero(3*nb_contacts);
-    double constraint_eps = 1e-10;
-    double max_force = 1.0;
-    double cur_force = 0.;
+    
+    VectorXd bl = VectorXd::Zero(l.size());
+    double constraint_eps = epsilon;
+    std::vector<int> base_inactive;
+
     for(int i = 0; i < nb_contacts; i++){
-        l_fi(0) = l(nb_contacts + 2*i);
-        l_fi(1) = l(nb_contacts + 2*i+1);
-        norm_lfi = l_fi.squaredNorm();
-        slack(i) = norm_lfi - (l(i) * l(i));
-        cur_force = l(i) + l_fi.norm();
-        if (cur_force > max_force)
+        if(l(i) > constraint_eps)
         {
-            max_force = cur_force;
+                base_inactive.push_back(i);
         }
-        //D(i, i) = -2 * gamma(i);
-        //D(nb_contacts + 2 * i, nb_contacts + 2 * i) = 2 * gamma(i);
-        //D(nb_contacts + 2 * i + 1,nb_contacts + 2 * i + 1) = 2 * gamma(i);
-        D_diag(i) = -2 * gamma(i);
-        D_diag(nb_contacts + 2 * i) = 2 * gamma(i);
-        D_diag(nb_contacts + 2 * i + 1) = 2 * gamma(i);
     }
-    bool edge_case = true;
+
+    int n_lvars = base_inactive.size();
+    if (n_lvars == 0)
+    {
+        cout << "zero solution!" << endl;
+        return bl;
+    }
+
+    // nonzero grad_l; procede to generating it
+    // first, remove inactive cones
+    int ni, fxi, fyi;
+    VectorXd q_not_null = VectorXd::Zero(3 * n_lvars);
+    VectorXd grad_l_not_null = VectorXd::Zero(3 * n_lvars);
+    VectorXd l_not_null = VectorXd::Zero(3 * n_lvars);
+    MatrixXd P_pretild = MatrixXd::Zero(l.size(), 3 * n_lvars);
+    MatrixXd P_tild = MatrixXd::Zero(3 * n_lvars, 3 * n_lvars);
     std::vector<int> edge_active;
-    std::vector<int> base_active;
-    for (int i = 0; i<nb_contacts; i++){
-        if(slack(i)>-constraint_eps){
-            if (edge_case && (l(i) < constraint_eps))
-            {
-            base_active.push_back(i);
-            }
+    for (int i = 0; i<n_lvars; i++){
+        ni = base_inactive[i];
+        fxi = base_inactive[i] * 2 + nb_contacts;
+        fyi = fxi + 1;
+
+        grad_l_not_null(i) = grad_l(ni);
+        grad_l_not_null(n_lvars + 2 * i) = grad_l(fxi);
+        grad_l_not_null(n_lvars + 2 * i + 1) = grad_l(fyi);
+
+        q_not_null(i) = q(ni);
+        q_not_null(n_lvars + 2 * i) = q(fxi);
+        q_not_null(n_lvars + 2 * i + 1) = q(fyi);
+
+        l_not_null(i) = l(ni);
+        l_not_null(n_lvars + 2 * i) = l(fxi);
+        l_not_null(n_lvars + 2 * i + 1) = l(fyi);
+
+        P_pretild.col(i) = P.col(ni);
+        P_pretild.col(n_lvars + 2 * i) = P.col(fxi);
+        P_pretild.col(n_lvars + 2 * i) = P.col(fyi);
+
+        l_fi(0) = l(fxi);
+        l_fi(1) = l(fyi);
+        if ((l(ni) - l_fi.norm()) < constraint_eps)
+        {
             edge_active.push_back(i);
         }
-        
+
     }
-    int nbi = base_active.size();
-    int n_constraints = edge_active.size() + 2 * base_active.size();
-    int cur_constraint = 0;
-    int ni, fxi, fyi;
-    MatrixXd B = MatrixXd::Zero(n_constraints, 3*nb_contacts);
-    for (int i = 0; i<edge_active.size(); i++){
-        ni = edge_active[i];
-        fxi = edge_active[i] * 2 + nb_contacts;
+    for (int i = 0; i<n_lvars; i++){
+        ni = base_inactive[i];
+        fxi = base_inactive[i] * 2 + nb_contacts;
         fyi = fxi + 1;
-        if (edge_case && (l(ni) < constraint_eps))
-        {
-            // base constraint
-            B(cur_constraint++, ni) = max_force;
-            B(cur_constraint++, fxi) = max_force;
-            B(cur_constraint++, fyi) = max_force;
-        }
-        else
-        {
-            B(cur_constraint, ni) = - 2. * l(ni);
-            B(cur_constraint, fxi) = 2. * l(fxi);
-            B(cur_constraint++, fyi) = 2. * l(fyi);
-        }
+        P_tild.row(i) = P_pretild.row(ni);
+        P_tild.row(n_lvars + 2 * i) = P_pretild.row(fxi);
+        P_tild.row(n_lvars + 2 * i) = P_pretild.row(fyi);
     }
-    
-    // construct gamma in situ
+
+    // terminate early if no active constraints
+    if (edge_active.size() == 0)
+    {
+        cout << "none active" << endl;
+        return iterative_refinement(P_tild, grad_l_not_null);
+    }
+
+
+
+    // constraint matrix
+    int n_constraints = edge_active.size();
+    MatrixXd B = MatrixXd::Zero(n_constraints, 3 * n_lvars);
+    for (int i = 0; i < n_constraints; i++){
+        ni = edge_active[i];
+        fxi = edge_active[i] * 2 + n_lvars;
+        fyi = fxi + 1;
+        B(i, ni) = - 2. * l_not_null(ni);
+        B(i, fxi) = 2. * l_not_null(fxi);
+        B(i, fyi) = 2. * l_not_null(fyi);
+    }
+    VectorXd obj_grad_not_null(3 * n_lvars);
+    obj_grad_not_null = P_tild * l_not_null + q_not_null;
     VectorXd gamma_not_null(n_constraints);
-    gamma_not_null = -iterative_refinement2(B.transpose(), P * l + q);
 
-    //for(int i = 0; i < nb_contacts; i++){
-    //    D_diag(i) = -2 * gamma(i);
-    //    D_diag(nb_contacts + 2 * i) = 2 * gamma(i);
-    //    D_diag(nb_contacts + 2 * i + 1) = 2 * gamma(i);
-    //}
-    cur_constraint = 0;
+
+    gamma_not_null = iterative_refinement(B.transpose(), -obj_grad_not_null);
+
+
+    VectorXd D_diag = VectorXd::Zero(3 * n_lvars);
     for (int i = 0; i<edge_active.size(); i++){
         ni = edge_active[i];
-        fxi = edge_active[i] * 2 + nb_contacts;
+        fxi = edge_active[i] * 2 + n_lvars;
         fyi = fxi + 1;
-        if (edge_case && (l(ni) < constraint_eps))
-        {
-            //no gradient
-            //D_diag(cur_constraint++, ni) = max_force;
-            //B(cur_constraint++, fxi) = max_force;
-            //B(cur_constraint++, fyi) = max_force;
-        }
-        else
-        {
-            D_diag(ni) = -2 * gamma_not_null(i);
-            D_diag(nb_contacts + 2 * i) = 2 * gamma_not_null(i);
-            D_diag(nb_contacts + 2 * i + 1) = 2 * gamma_not_null(i);
-        }
+        D_diag(ni) = -2 * gamma_not_null(i);
+        D_diag(fxi) = 2 * gamma_not_null(i);
+        D_diag(fyi) = 2 * gamma_not_null(i);
     }
-
-
-    MatrixXd A(n_constraints + l.size(), n_constraints+ l.size());
     
-    A.topRightCorner(n_constraints,l.size()) = B;
-    A.bottomLeftCorner(l.size(), n_constraints) = B.transpose();
-    //A.bottomRightCorner(l.size(), l.size()) = D;
-    A.bottomRightCorner(l.size(), l.size()) = P + MatrixXd(D_diag.asDiagonal());
-
-    //MatrixXd A(l.size(),l.size());
-    //A = D_tild - (C_tild * (A_tild_inv * D_tild));
-    //A.transposeInPlace();
+    MatrixXd A(n_constraints + 3 * n_lvars, n_constraints + 3 * n_lvars);
+    
+    A.topRightCorner(n_constraints, 3 * n_lvars) = B;
+    A.bottomLeftCorner(3 * n_lvars, n_constraints) = B.transpose();
+    A.bottomRightCorner(3 * n_lvars, 3 * n_lvars) = P_tild + MatrixXd(D_diag.asDiagonal());
 
     VectorXd dd(A.rows());
     for(int i = 0 ; i< dd.size(); i++){
@@ -654,22 +625,24 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
             dd(i) = 0.;
         }
         else{
-            dd(i) = grad_l(i-n_constraints);
+            dd(i) = grad_l_not_null(i-n_constraints);
         }
     }
     VectorXd b(A.cols());
-    b = iterative_refinement2(A,dd);
-    //b = A.llt().solve(dd);
-    //b = A.colPivHouseholderQr().solve(dd);
-    //b = Solver::iterative_refinement(A,grad_l);
-    
-    VectorXd bl = VectorXd::Zero(l.size());
-    for (int i = 0; i < l.size(); i++)
+    b = iterative_refinement(A,dd);
+    for (int i = 0; i < n_lvars ; i++)
     {
+        ni = base_inactive[i];
+        fxi = base_inactive[i] * 2 + nb_contacts;
+        fyi = fxi + 1;
         //bl(base_inactive[i]) = b(i+edge_active.size());
-        bl(i) = b(i+n_constraints);
+        bl(ni) = b(n_constraints + i);
+        bl(fxi) = b(n_constraints + n_lvars + 2 * i);
+        bl(fyi) = b(n_constraints + n_lvars + 2 * i + 1);
     }
     return bl;
+    
+
 }
 
 
