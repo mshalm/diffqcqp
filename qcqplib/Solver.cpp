@@ -20,7 +20,7 @@ VectorXd Solver::iterative_refinement(const Ref<const MatrixXd> &A,const VectorX
     AA_tild = A.transpose()*A;
     AA_tild += mu_ir*MatrixXd::Identity(AA_tild.rows(),AA_tild.cols());
     AA_tild_inv.setIdentity();
-    AA_tild.ldlt().solveInPlace(AA_tild_inv);
+    AA_tild.llt().solveInPlace(AA_tild_inv);
     int not_improved = 0;
     double res;
     double res_pred = std::numeric_limits<double>::max();
@@ -44,24 +44,33 @@ VectorXd Solver::iterative_refinement(const Ref<const MatrixXd> &A,const VectorX
 }
 
 VectorXd Solver::iterative_refinement2(const Ref<const MatrixXd> &A,const VectorXd &b,const double mu_ir = 1e-7,const double epsilon = 1e-10,const int max_iter = 10){ //solves the system Ax=b using iterative refinement
-
+    VectorXd Ab(A.cols()), delta(A.cols());
+    MatrixXd AA_tild(A.cols(), A.cols()), AA_tild_reg(A.cols(), A.cols()), AA_tild_inv(A.cols(), A.cols());
     VectorXd x = VectorXd::Zero(A.cols());
-    VectorXd delta = VectorXd::Zero(A.cols());
-    ColPivHouseholderQR<MatrixXd> qr(A.rows(), A.cols());
-    //BDCSVD<MatrixXd> qr(A.rows(), A.cols(), ComputeThinU | ComputeThinV);
-    qr.compute(A);
+    VectorXd x_best = VectorXd::Zero(A.cols());
+    Ab = A.transpose() * b;
+    AA_tild = A.transpose() * A;
+    AA_tild_reg = AA_tild;
+    double mu_rel = Solver::power_iteration(AA_tild, epsilon, 100) * 1e-5;
+    AA_tild_reg += (mu_ir + mu_rel) * MatrixXd::Identity(AA_tild.rows(), AA_tild.cols());
+    AA_tild_inv.setIdentity();
+    AA_tild_reg.llt().solveInPlace(AA_tild_inv);
     int not_improved = 0;
     double res;
     double res_pred = std::numeric_limits<double>::max();
-    x = qr.solve(b);
+    x = AA_tild_inv*Ab;
+    x_best = x;
+    delta.noalias() = Ab - AA_tild * x;
+    res = delta.norm();
     for(int i = 0; i<max_iter; i++){
-        delta.noalias() = b - A * x;
+        x += AA_tild_inv*delta;
+        delta.noalias() = AA_tild*x - Ab;
         res = delta.norm();
-        x = x.eval() + qr.solve(delta);
         if(res_pred - res < epsilon){
             not_improved++;
         }
         else{
+            x_best = x;
             res_pred = res;
             not_improved = 0;
         }
@@ -69,7 +78,7 @@ VectorXd Solver::iterative_refinement2(const Ref<const MatrixXd> &A,const Vector
             break;
         }
     }
-    return x;
+    return x_best;
 }
 
 double Solver::power_iteration(const MatrixXd &A,const  double epsilon = 1e-10, const int max_iter = 100){//computes the biggest eigenvalue of A
@@ -509,7 +518,7 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
     VectorXd slack(nb_contacts);
     double norm_lfi;
     VectorXd l_fi(2);
-    
+    double tikhonov = -1.;
     VectorXd bl = VectorXd::Zero(l.size());
     double constraint_eps = epsilon;
     std::vector<int> base_inactive;
@@ -576,48 +585,48 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
     }
 
     // terminate early if no active constraints
-    if (edge_active.size() == 0)
-    {
-        cout << "none active" << endl;
-        return iterative_refinement(P_tild, grad_l_not_null);
-    }
-
-
-
-    // constraint matrix
     int n_constraints = edge_active.size();
-    MatrixXd B = MatrixXd::Zero(n_constraints, 3 * n_lvars);
-    for (int i = 0; i < n_constraints; i++){
-        ni = edge_active[i];
-        fxi = edge_active[i] * 2 + n_lvars;
-        fyi = fxi + 1;
-        B(i, ni) = - 2. * l_not_null(ni);
-        B(i, fxi) = 2. * l_not_null(fxi);
-        B(i, fyi) = 2. * l_not_null(fyi);
-    }
-    VectorXd obj_grad_not_null(3 * n_lvars);
-    obj_grad_not_null = P_tild * l_not_null + q_not_null;
-    VectorXd gamma_not_null(n_constraints);
-
-
-    gamma_not_null = iterative_refinement(B.transpose(), -obj_grad_not_null);
-
-
-    VectorXd D_diag = VectorXd::Zero(3 * n_lvars);
-    for (int i = 0; i<edge_active.size(); i++){
-        ni = edge_active[i];
-        fxi = edge_active[i] * 2 + n_lvars;
-        fyi = fxi + 1;
-        D_diag(ni) = -2 * gamma_not_null(i);
-        D_diag(fxi) = 2 * gamma_not_null(i);
-        D_diag(fyi) = 2 * gamma_not_null(i);
-    }
-    
     MatrixXd A(n_constraints + 3 * n_lvars, n_constraints + 3 * n_lvars);
-    
-    A.topRightCorner(n_constraints, 3 * n_lvars) = B;
-    A.bottomLeftCorner(3 * n_lvars, n_constraints) = B.transpose();
-    A.bottomRightCorner(3 * n_lvars, 3 * n_lvars) = P_tild + MatrixXd(D_diag.asDiagonal());
+    double gamma_max = 0;
+    if (n_constraints == 0)
+    {
+        A = P_tild;
+    }
+    else
+    {
+        // constraint matrix
+        
+        MatrixXd B = MatrixXd::Zero(n_constraints, 3 * n_lvars);
+        for (int i = 0; i < n_constraints; i++){
+            ni = edge_active[i];
+            fxi = edge_active[i] * 2 + n_lvars;
+            fyi = fxi + 1;
+            B(i, ni) = - 2. * l_not_null(ni);
+            B(i, fxi) = 2. * l_not_null(fxi);
+            B(i, fyi) = 2. * l_not_null(fyi);
+        }
+        VectorXd obj_grad_not_null(3 * n_lvars);
+        obj_grad_not_null = P_tild * l_not_null + q_not_null;
+        VectorXd gamma_not_null(n_constraints);
+
+
+        gamma_not_null = iterative_refinement2(B.transpose(), -obj_grad_not_null, 1e-7);
+        gamma_max = gamma_not_null.maxCoeff();
+
+        VectorXd D_diag = VectorXd::Zero(3 * n_lvars);
+        for (int i = 0; i<edge_active.size(); i++){
+            ni = edge_active[i];
+            fxi = edge_active[i] * 2 + n_lvars;
+            fyi = fxi + 1;
+            D_diag(ni) = -2 * gamma_not_null(i);
+            D_diag(fxi) = 2 * gamma_not_null(i);
+            D_diag(fyi) = 2 * gamma_not_null(i);
+        }
+        
+        A.topRightCorner(n_constraints, 3 * n_lvars) = B;
+        A.bottomLeftCorner(3 * n_lvars, n_constraints) = B.transpose();
+        A.bottomRightCorner(3 * n_lvars, 3 * n_lvars) = P_tild + MatrixXd(D_diag.asDiagonal());
+    }
 
     VectorXd dd(A.rows());
     for(int i = 0 ; i< dd.size(); i++){
@@ -628,8 +637,12 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
             dd(i) = grad_l_not_null(i-n_constraints);
         }
     }
-    VectorXd b(A.cols());
-    b = iterative_refinement(A,dd);
+    if (tikhonov > 0.0)
+    {
+        A += tikhonov * MatrixXd::Identity(A.rows(), A.cols());
+    }
+    
+    VectorXd b = iterative_refinement2(A, dd, 1e-7);
     for (int i = 0; i < n_lvars ; i++)
     {
         ni = base_inactive[i];

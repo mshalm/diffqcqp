@@ -107,7 +107,7 @@ class LCQPFn2(Function):
         for i in range(batch_size):
             t0 = time.time()
             l_2[i,:,0] = torch.from_numpy(solveLCQP(P[i,:,:].detach().numpy(),q[i,:,:].detach().numpy(), warm_start[i,:,:].detach().numpy(), eps, mu_prox, max_iter,adaptative_rho))
-        ctx.save_for_backward(P,q,l_2)
+        ctx.save_for_backward(P,q,l_2,torch.tensor(eps))
         #print('fwd')
         return l_2
     
@@ -118,13 +118,14 @@ class LCQPFn2(Function):
         '''
 
         #print('back')
-        P,q,l = ctx.saved_tensors
+        P,q,l,eps = ctx.saved_tensors
+        eps = eps.numpy().item()
         num_contact = q.size()[1] // 3
         batch_size = q.size()[0]
         grad_P, grad_q = None, None
         dl = torch.zeros(l.size())
         for i in range(batch_size):
-            bl = solveDerivativesLCQP(P[i,:,:].detach().numpy(),q[i,:,:].detach().numpy(),l[i,:,:].detach().numpy(),grad_l[i,:,:].detach().numpy())
+            bl = solveDerivativesLCQP(P[i,:,:].detach().numpy(),q[i,:,:].detach().numpy(),l[i,:,:].detach().numpy(),grad_l[i,:,:].detach().numpy(),eps)
             #print(bl.norm())
             bl = torch.from_numpy(bl)
             dl[i,:,0] = bl

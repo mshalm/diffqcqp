@@ -20,13 +20,14 @@ plt.style.use('bmh')
 import pdb
 
 class QCQP_cvxpy(nn.Module):
-    def __init__(self,NC,eps=1e-14, max_iter = 100):
+    def __init__(self,NC, reg, eps=1e-14, max_iter = 100):
         '''
         '''
         super().__init__()
         self.eps = eps
         self.max_iter = max_iter
         self.NC = NC
+        self.reg = reg
         self.initLayer()
 
     def initLayer(self):
@@ -55,7 +56,7 @@ class QCQP_cvxpy(nn.Module):
         b = -P_sqrt.transpose(1,2).bmm(q)
         #L = torch.transpose(torch.cholesky(P+k*torch.eye(P.size()[1])),1,2)
         #print(L.size(), q.size(), mu.size(), l_n.size())
-        solution, = self.cvxpylayer(P_sqrt,b.squeeze(2),solver_args={'eps': self.eps,'max_iters':self.max_iter})
+        solution, = self.cvxpylayer(P_sqrt + self.reg * torch.eye(q.size()[1]),b.squeeze(2),solver_args={'eps': self.eps,'max_iters':self.max_iter})
         #solution, = cvxpylayer(P,q.squeeze(2),(mu*l_n).squeeze(2),solver_args={'eps': self.eps,'max_iters':self.max_iter})
         #print(solution)
         return solution
@@ -66,18 +67,21 @@ class QCQP_cvxpy(nn.Module):
 cvxpy_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0, 'obj': [], 'grad': [], 'drop': []}
 qcqp_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0, 'obj': [], 'grad': [], 'drop': []}
 comp = {'abs_err': [], 'rel_err': [], 'abs_err_grad': [], 'rel_err_grad': [], 'our_advantage': [], 'our_rel_advantage': []}
-n_testqcqp= 100
+n_testqcqp= 1000
 NC = 8
 N = NC * 3
-scale = 3
-qcqp2 = QCQP_cvxpy(NC, eps=1e-10,max_iter = 1000000)
+scale = 4
+zero_chance = 0.5
+diag_min = 0.0
+cvxpy_reg = 10 ** (-2.5)
+qcqp2 = QCQP_cvxpy(NC, cvxpy_reg, eps=1e-10,max_iter = 1000000)
 #lcqp = 
 def qcqpfunct(P_sqrt, q):
     warm_start = torch.rand(q.size())
     #pdb.set_trace()
-    P = P_sqrt ** 2
+    P = P_sqrt.transpose(1,2).bmm(P_sqrt)
     b = -P_sqrt.transpose(1,2).bmm(q)
-    l1 = LCQPFn2().apply(P,b,warm_start,1e-10,1000000)
+    l1 = LCQPFn2().apply(P, b, warm_start, 1e-10, 1000000)
     return l1
 
 def cvxpyfunct(P_sqrt, q):
@@ -125,8 +129,11 @@ for i in tqdm(range(n_testqcqp)):
     #P = torch.rand((1,8,8),dtype = torch.double)
     P = torch.rand(N)*2 -1
     P = P * scale
-    P_sqrt = torch.diag(torch.pow(10,P/2)).unsqueeze(0)
-    P = torch.diag(torch.pow(10,P)).unsqueeze(0)
+    P_sqrt = torch.pow(10,P/2)
+    P_sqrt[torch.rand(N) < zero_chance] = 0.0
+    P_sqrt[P_sqrt < diag_min] = diag_min
+    P_sqrt = torch.diag(P_sqrt).unsqueeze(0)
+    #pdb.set_trace()
     q = torch.rand((1,N,1),dtype = torch.double)*2-1
     q_pow = torch.rand((1,N,1),dtype = torch.double)*2-1
     q_pow = torch.pow(10, q_pow / 2)
