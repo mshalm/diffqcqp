@@ -67,15 +67,26 @@ class QCQP_cvxpy(nn.Module):
 cvxpy_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0, 'obj': [], 'grad': [], 'drop': []}
 qcqp_time = {'forward': [], 'backward':[], 'fnan': 0, 'bnan': 0, 'obj': [], 'grad': [], 'drop': []}
 comp = {'abs_err': [], 'rel_err': [], 'abs_err_grad': [], 'rel_err_grad': [], 'our_advantage': [], 'our_rel_advantage': []}
-n_testqcqp= 1000
+
+# number of tests
+n_testqcqp = 400
+
+# number of Lorentz cones
 NC = 8
+
+# number of problem variables
 N = NC * 3
+
+# singular values of objective matrix range from 10 ^ (-scale) to 10 ^ scale
 scale = 4
-zero_chance = 0.5
-diag_min = 0.0
-cvxpy_reg = 10 ** (-2.5)
+
+# singular values are randomly set to zero with probability zero_chance
+zero_chance = 0.0
+
+# cvxpy requires strict convexity; cvxpy_reg * eye(N) is added to the obejctive matrix to ensure this
+cvxpy_reg = 0.0 #10 ** (-2.5)
 qcqp2 = QCQP_cvxpy(NC, cvxpy_reg, eps=1e-10,max_iter = 1000000)
-#lcqp = 
+
 def qcqpfunct(P_sqrt, q):
     warm_start = torch.rand(q.size())
     #pdb.set_trace()
@@ -127,17 +138,16 @@ def QCQP_eval(P_sqrt, q, func, timed):
 
 for i in tqdm(range(n_testqcqp)):    
     #P = torch.rand((1,8,8),dtype = torch.double)
-    P = torch.rand(N)*2 -1
-    P = P * scale
-    P_sqrt = torch.pow(10,P/2)
+    P_sqrt = torch.rand(N) - 0.5
+    P_sqrt = P_sqrt * scale
+    P_sqrt = torch.pow(10, P_sqrt)
     P_sqrt[torch.rand(N) < zero_chance] = 0.0
-    P_sqrt[P_sqrt < diag_min] = diag_min
     P_sqrt = torch.diag(P_sqrt).unsqueeze(0)
     #pdb.set_trace()
-    q = torch.rand((1,N,1),dtype = torch.double)*2-1
-    q_pow = torch.rand((1,N,1),dtype = torch.double)*2-1
-    q_pow = torch.pow(10, q_pow / 2)
-    q = q = q * q_pow
+    q = torch.rand((1,N,1),dtype = torch.double) - 0.5
+    q_pow = torch.rand((1,N,1),dtype = torch.double) - 0.5
+    q_pow = torch.pow(10, q_pow)
+    q = q * q_pow
     #P = torch.matmul(P, torch.transpose(P,1,2))
     (fnan, bnan, tf, tb, loss, grad, drop) = QCQP_eval(P_sqrt, q, qcqpfunct, True)
     qcqp_time['fnan'] += fnan
