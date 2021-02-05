@@ -43,39 +43,43 @@ VectorXd Solver::iterative_refinement(const Ref<const MatrixXd> &A,const VectorX
     return x;
 }
 
-VectorXd Solver::iterative_refinement2(const Ref<const MatrixXd> &A,const VectorXd &b,const double mu_ir = 1e-7,const double epsilon = 1e-10,const int max_iter = 10){ //solves the system Ax=b using iterative refinement
-    VectorXd Ab(A.cols()), delta(A.cols());
+VectorXd Solver::iterative_refinement2(const Ref<const MatrixXd> &A, const VectorXd &b, const double mu_ir = 1e-7, const double mu_rel = 1e-5, const double epsilon = 1e-10, const int max_iter = 10)
+{   //solves the system Ax=b using iterative refinement
+    VectorXd Ab(A.cols()), delta(A.cols()), x(A.cols()), x_best(A.cols());
     MatrixXd AA_tild(A.cols(), A.cols()), AA_tild_reg(A.cols(), A.cols());
-    VectorXd x = VectorXd::Zero(A.cols());
-    VectorXd x_best = VectorXd::Zero(A.cols());
-
-    int not_improved = 0;
-    double res;
-    double res_pred = std::numeric_limits<double>::max();
 
     Ab = A.transpose() * b;
     AA_tild = A.transpose() * A;
-
     AA_tild_reg = AA_tild;
-    double mu_rel = Solver::power_iteration(AA_tild, epsilon, 100) * 1e-5;
-    AA_tild_reg += (mu_ir + mu_rel) * MatrixXd::Identity(AA_tild.rows(), AA_tild.cols());
+    double reg = mu_ir + mu_rel * Solver::power_iteration(AA_tild, epsilon, 100);
+    AA_tild_reg += reg * MatrixXd::Identity(AA_tild.rows(), AA_tild.cols());
     LLT<MatrixXd> llt = AA_tild_reg.llt();
-
-    delta.noalias() = Ab;
-    res = delta.norm();
-    for(int i = 0; i<max_iter; i++){
-        x += llt.solve(delta);
-        delta.noalias() = AA_tild*x - Ab;
+    
+    int not_improved = 0;
+    double res;
+    double res_pred = std::numeric_limits<double>::max();
+    x = VectorXd::Zero(A.cols());
+    x_best = x;
+    delta = Ab;
+    
+    for (int i = 0; i < max_iter; i++)
+    {
+        llt.solveInPlace(delta);
+        x += delta;
+        delta.noalias() = AA_tild * x - Ab;
         res = delta.norm();
-        if(res_pred - res < epsilon){
+        if (res_pred - res < epsilon)
+        {
             not_improved++;
         }
-        else{
+        else
+        {
             x_best = x;
             res_pred = res;
             not_improved = 0;
         }
-        if (res<epsilon || not_improved ==2){
+        if (res < epsilon || not_improved == 2)
+        {
             break;
         }
     }

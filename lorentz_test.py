@@ -78,7 +78,7 @@ NC = 8
 N = NC * 3
 
 # singular values of objective matrix range from 10 ^ (-scale) to 10 ^ scale
-scale = 4
+scale = 3
 
 # singular values are randomly set to zero with probability zero_chance
 zero_chance = 0.0
