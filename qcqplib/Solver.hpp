@@ -8,8 +8,7 @@ class Solver
     public:
     Solver();
     double power_iteration(const MatrixXd &A, const double epsilon,const int maxStep);
-    VectorXd iterative_refinement(const Ref<const MatrixXd> &A,const VectorXd &b, const double mu_ir, const double epsilon, const int max_iter);
-    VectorXd iterative_refinement2(const Ref<const MatrixXd> &A,const VectorXd &b, const double mu_ir, const double mu_rel, const double epsilon, const int max_iter);
+    VectorXd iterative_refinement(const Ref<const MatrixXd> &A,const VectorXd &b, const double mu_ir, const double mu_rel, const double epsilon, const int max_iter);
     VectorXd solveQP( MatrixXd P, const VectorXd &q, const VectorXd &warm_start , const double epsilon, const double mu_prox, const int max_iter, const bool adaptative_rho);
     VectorXd dualFromPrimalQP(const MatrixXd &P,const VectorXd &q,const VectorXd &l, const double &epsilon);
     VectorXd solveDerivativesQP(const MatrixXd &P, const VectorXd &q, const VectorXd &l, const VectorXd &gamma, const VectorXd &grad_l, const double &epsilon);

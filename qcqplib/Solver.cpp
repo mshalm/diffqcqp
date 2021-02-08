@@ -12,38 +12,8 @@ Solver::Solver(){
     prob_id = 1;
 }
 
-VectorXd Solver::iterative_refinement(const Ref<const MatrixXd> &A,const VectorXd &b,const double mu_ir = 1e-7,const double epsilon = 1e-10,const int max_iter = 10){ //solves the system Ax=b using iterative refinement
-    VectorXd Ab(A.cols()), delta(A.cols());
-    MatrixXd AA_tild(A.cols(), A.cols()),AA_tild_inv(A.cols(), A.cols());
-    VectorXd x = VectorXd::Zero(A.cols());
-    Ab = A.transpose()*b;
-    AA_tild = A.transpose()*A;
-    AA_tild += mu_ir*MatrixXd::Identity(AA_tild.rows(),AA_tild.cols());
-    AA_tild_inv.setIdentity();
-    AA_tild.llt().solveInPlace(AA_tild_inv);
-    int not_improved = 0;
-    double res;
-    double res_pred = std::numeric_limits<double>::max();
-    VectorXd AA_tild_invAb = AA_tild_inv*Ab;
-    for(int i = 0; i<max_iter; i++){
-        x = mu_ir*AA_tild_inv*x + AA_tild_invAb;
-        delta.noalias() = AA_tild*x - Ab;
-        res = delta.norm();
-        if(res_pred - res < epsilon){
-            not_improved++;
-        }
-        else{
-            res_pred = res;
-            not_improved = 0;
-        }
-        if (res<epsilon || not_improved ==2){
-            break;
-        }
-    }
-    return x;
-}
 
-VectorXd Solver::iterative_refinement2(const Ref<const MatrixXd> &A, const VectorXd &b, const double mu_ir = 1e-7, const double mu_rel = 1e-5, const double epsilon = 1e-10, const int max_iter = 10)
+VectorXd Solver::iterative_refinement(const Ref<const MatrixXd> &A, const VectorXd &b, const double mu_ir = 1e-7, const double mu_rel = 1e-5, const double epsilon = 1e-10, const int max_iter = 10)
 {   //solves the system Ax=b using iterative refinement
     VectorXd Ab(A.cols()), delta(A.cols()), x(A.cols()), x_best(A.cols());
     MatrixXd AA_tild(A.cols(), A.cols()), AA_tild_reg(A.cols(), A.cols());
@@ -613,7 +583,7 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
         VectorXd gamma_not_null(n_constraints);
 
 
-        gamma_not_null = iterative_refinement2(B.transpose(), -obj_grad_not_null, 1e-7);
+        gamma_not_null = iterative_refinement(B.transpose(), -obj_grad_not_null);
         gamma_max = gamma_not_null.maxCoeff();
 
         VectorXd D_diag = VectorXd::Zero(3 * n_lvars);
@@ -641,7 +611,7 @@ VectorXd Solver::solveDerivativesLCQP(const MatrixXd &P, const VectorXd &q, cons
         }
     }
     
-    VectorXd b = iterative_refinement2(A, dd, 1e-7);
+    VectorXd b = iterative_refinement(A, dd);
     for (int i = 0; i < n_lvars ; i++)
     {
         ni = base_inactive[i];
