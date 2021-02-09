@@ -4,7 +4,7 @@ from time import time
 import timeit
 from tqdm import tqdm
 from torch import optim
-from qcqp import QPFn2, QCQPFn2
+from diffqcqp import QPFn2, QCQPFn2
 import torch
 torch.set_default_dtype(torch.double)
 import torch.nn as nn

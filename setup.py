@@ -6,7 +6,7 @@ import subprocess
 import pdb
 import glob
 
-from setuptools import setup, Extension
+from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext
 from distutils.version import LooseVersion
 
@@ -35,6 +35,7 @@ class CMakeBuild(build_ext):
 
     def build_extension(self, ext):
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
+        #pdb.set_trace()
         # required for auto-detection of auxiliary "native" libs
         if not extdir.endswith(os.path.sep):
             extdir += os.path.sep
@@ -69,10 +70,8 @@ class CMakeBuild(build_ext):
         subprocess.check_call(['cmake', ext.sourcedir] + cmake_args, cwd=self.build_temp, env=env)
         subprocess.check_call(['cmake', '--build', '.'] + build_args, cwd=self.build_temp)
 
-        # directory hack for macOS
-        #if platform.system() == 'Darwin':
-        for file in glob.glob(extdir + '*'):
-            subprocess.check_call(['cp', file, './build'])
+        # move built file into src
+        subprocess.check_call(['cp', self.get_ext_fullpath(ext.name), './src/diffqcqp'])
 
 
 setup(
@@ -84,7 +83,9 @@ setup(
     description="Implementation of QP and QCQP solvers and their derivatives",
     long_description="",
     extras_require={},
-    ext_modules=[CMakeExtension('diff_qcqp')],
+    packages=find_packages('src'),
+    package_dir={'':'src'},
+    ext_modules=[CMakeExtension('diffqcqp/diffsolvers')],
     cmdclass=dict(build_ext=CMakeBuild),
     zip_safe=False,
 )

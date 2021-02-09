@@ -1,5 +1,5 @@
 #include <iostream>
-#include "qcqplib/Solver.hpp"
+#include "Solver.hpp"
 
 using namespace std;
  
