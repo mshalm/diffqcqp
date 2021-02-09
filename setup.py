@@ -70,9 +70,9 @@ class CMakeBuild(build_ext):
         subprocess.check_call(['cmake', '--build', '.'] + build_args, cwd=self.build_temp)
 
         # directory hack for macOS
-        if platform.system() == 'Darwin':
-            for file in glob.glob(extdir + '*'):
-                subprocess.check_call(['cp', file, './build'])
+        #if platform.system() == 'Darwin':
+        for file in glob.glob(extdir + '*'):
+            subprocess.check_call(['cp', file, './build'])
 
 
 setup(

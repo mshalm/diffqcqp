@@ -6,8 +6,7 @@ enable_testing()
 
 find_package(pybind11 REQUIRED)
 find_package(Eigen3 3.3 REQUIRED)
-find_package(Python3 3.7.6 REQUIRED)
-
+find_package(PythonLibs 3)
 add_subdirectory(qcqplib)
 
 add_executable(diffsolver main.cpp)

@@ -13,9 +13,7 @@ from torch.nn.parameter import Parameter
 import torch.nn.functional as F
 from cvxpylayers.torch import CvxpyLayer
 import cvxpy as cp
-from qpth.qp import QPFunction
 import matplotlib.pyplot as plt
-import osqp
 plt.style.use('bmh')
 import pdb
 
