@@ -62,7 +62,7 @@ Experiments comparing runtime performances of the solver during forward and back
 python test_script.py
 ```
 
-![test_results](qcqp_runtime.png)
+![test_results](test/qcqp_runtime.png)
 
 
 ## Citing
