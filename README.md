@@ -27,7 +27,7 @@ python setup.py install
 Below is a usage example showing how our differentiable solver is used and can be integrated into a learning architecture by taking advantage of PyTorch autodiff tool.
 ```
 import torch
-from qcqp import QPFn2
+from diffqcqp import QPFn2
 
 B= 10 #batch size
 N = 8 #dimension of the problem
@@ -62,7 +62,7 @@ Experiments comparing runtime performances of the solver during forward and back
 python test_script.py
 ```
 
-![test_results](qcqp_runtime.png)
+![test_results](test/qcqp_runtime.png)
 
 
 ## Citing
