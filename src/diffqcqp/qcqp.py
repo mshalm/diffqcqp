@@ -123,6 +123,8 @@ class LCQPFn2(Function):
         for i in range(batch_size):
             bl = solveDerivativesLCQP(P[i,:,:].detach().numpy(),q[i,:,:].detach().numpy(),l[i,:,:].detach().numpy(),grad_l[i,:,:].detach().numpy(),eps)
             bl = torch.from_numpy(bl)
+            if torch.any(torch.isnan(bl)):
+                bl = torch.zeros(bl.size())
             dl[i,:,0] = bl
         if ctx.needs_input_grad[0]:
             grad_P = -torch.bmm(dl, torch.transpose(l,1,2))
